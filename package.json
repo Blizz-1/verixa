@@ -22,7 +22,10 @@
     "test:coverage": "pnpm -r run test:coverage",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "db:backup": "bash scripts/db-backup.sh",
+    "db:restore": "bash scripts/db-restore.sh",
+    "db:benchmark": "pnpm --filter @verixa/identity run benchmark"
   },
   "lint-staged": {
     "*.{ts,tsx}": [

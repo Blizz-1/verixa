@@ -6,6 +6,7 @@ import type { OrganizationMembership } from "../../domain/entities/organization-
 import type { Organization, OrganizationId } from "../../domain/entities/organization.js";
 import type { UserId } from "../../domain/entities/user.js";
 
+import { withMappedErrors } from "./error-mapper.js";
 import { OrganizationMapper, OrganizationMembershipMapper } from "./organization-mapper.js";
 
 /** Prisma-backed `OrganizationRepository`. See `prisma-user-repository.ts` for the shared conventions. */
@@ -26,11 +27,13 @@ export class PrismaOrganizationRepository implements OrganizationRepository {
   async save(organization: Organization): Promise<void> {
     const row = OrganizationMapper.toRow(organization);
     const { id, ...withoutId } = row;
-    await this.prisma.organization.upsert({
-      where: { id },
-      create: row,
-      update: withoutId,
-    });
+    await withMappedErrors("Organization", () =>
+      this.prisma.organization.upsert({
+        where: { id },
+        create: row,
+        update: withoutId,
+      }),
+    );
   }
 
   async existsBySlug(slug: string): Promise<boolean> {
@@ -71,10 +74,12 @@ export class PrismaOrganizationMembershipRepository implements OrganizationMembe
   async save(membership: OrganizationMembership): Promise<void> {
     const row = OrganizationMembershipMapper.toRow(membership);
     const { id, ...withoutId } = row;
-    await this.prisma.organizationMembership.upsert({
-      where: { id },
-      create: row,
-      update: withoutId,
-    });
+    await withMappedErrors("OrganizationMembership", () =>
+      this.prisma.organizationMembership.upsert({
+        where: { id },
+        create: row,
+        update: withoutId,
+      }),
+    );
   }
 }

@@ -4,6 +4,7 @@ import type { UserRepository } from "../../application/ports/user-repository.js"
 import type { User, UserId } from "../../domain/entities/user.js";
 import type { Email } from "../../domain/value-objects/email.js";
 
+import { withMappedErrors } from "./error-mapper.js";
 import { UserMapper } from "./user-mapper.js";
 
 /**
@@ -52,11 +53,16 @@ export class PrismaUserRepository implements UserRepository {
     // callers don't distinguish create from update — the aggregate's state is
     // the only thing that matters. Doing this as a read-then-branch would
     // also open a race between the check and the write.
-    await this.prisma.user.upsert({
-      where: { id },
-      create: row,
-      update: withoutId,
-    });
+    // Writes go through the mapper; reads don't. A read that violates a
+    // constraint isn't a thing — only writes produce conflicts a caller can
+    // act on. See error-mapper.ts.
+    await withMappedErrors("User", () =>
+      this.prisma.user.upsert({
+        where: { id },
+        create: row,
+        update: withoutId,
+      }),
+    );
   }
 
   async existsByEmail(email: Email): Promise<boolean> {

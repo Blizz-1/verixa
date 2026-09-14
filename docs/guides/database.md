@@ -417,6 +417,140 @@ identifying data does not. `deleted_at` is indexed specifically so that job
 can find candidates efficiently — "every user deleted more than N days ago" is
 a range scan over that column.
 
+## Indexing
+
+Every query the repositories actually run is index-backed. The indexes:
+
+| Table                      | Index                                   | Serves                         |
+| -------------------------- | --------------------------------------- | ------------------------------ |
+| `users`                    | PK `id`                                 | `findById`                     |
+| `users`                    | unique `email` (citext)                 | `findByEmail`, `existsByEmail` |
+| `users`                    | `deleted_at`                            | Phase 24 retention scan        |
+| `organizations`            | unique `slug` (citext)                  | `findBySlug`, `existsBySlug`   |
+| `organization_memberships` | `(user_id, organization_id)`            | membership lookup              |
+| `organization_memberships` | `organization_id`                       | list by organization           |
+| `organization_memberships` | partial unique, `WHERE status='active'` | one active membership per pair |
+| `invitations`              | unique `token_hash`                     | `findByToken`                  |
+| `invitations`              | `(organization_id, status)`             | pending invitations            |
+| `invitations`              | `expires_at`                            | expiry sweep                   |
+
+### Why `organization_id` is indexed separately
+
+It looks redundant next to `(user_id, organization_id)` and isn't. A B-tree
+is only usable **from its leading column**, so a composite index on
+`(user_id, organization_id)` cannot serve a query filtering on
+`organization_id` alone. Dropping the standalone index would silently turn
+`findAllByOrganization` into a sequential scan.
+
+This is the least obvious call in the schema, which is why
+`tests/integration/index-usage.spec.ts` asserts it explicitly.
+
+### A sequential scan is not a bug
+
+On a small table a seq scan is genuinely _faster_ — reading three rows from
+one heap page beats descending a B-tree and then visiting the heap anyway.
+Postgres knows this and chooses correctly. It also correctly scans when a
+query touches most of the table, regardless of size.
+
+So the index test seeds thousands of rows before asserting anything, and runs
+`ANALYZE` first. Without volume the planner would rightly pick a scan and the
+assertion would fail; without fresh statistics it would be planning from
+defaults. Forcing the issue with `enable_seqscan = off` would prove only that
+Postgres obeys orders.
+
+The suite also asserts that an _unselective_ query still scans — a test suite
+treating every seq scan as failure would push toward indexes that make things
+worse.
+
+### Reading `EXPLAIN`
+
+```sql
+EXPLAIN SELECT * FROM users WHERE email = 'alice@example.com';
+```
+
+- **Index Scan** — walks the index, fetches matching heap rows.
+- **Index Only Scan** — answered entirely from the index; the heap is never
+  touched. Fastest.
+- **Bitmap Index Scan** — collects matches, then reads the heap in physical
+  order. Chosen when many rows match.
+- **Seq Scan** — reads every row. Correct for small tables and unselective
+  queries; a problem when a selective lookup falls back to it.
+
+`EXPLAIN ANALYZE` also _executes_ the query and reports real timings — use it
+to compare estimated against actual row counts. A large gap usually means
+stale statistics, and `ANALYZE` is the fix.
+
+## Backup and restore
+
+```bash
+pnpm db:backup            # -> backups/verixa-<timestamp>.dump
+pnpm db:backup my-label   # -> backups/my-label.dump
+pnpm db:restore           # restores the most recent dump
+pnpm db:restore my-label  # restores a specific one
+```
+
+Local and development only. Production backups — scheduling, offsite
+retention, encryption, point-in-time recovery — are Phase 20.
+
+`backups/` is git-ignored: dumps contain real local data and are large.
+
+### A backup you have never restored is not a backup
+
+The single most common backup failure is discovering, during an incident,
+that the dumps were empty, truncated, or unreadable all along. Nothing about
+taking a backup verifies you can get data back out of it.
+
+So run the drill. Take a backup, restore it into a scratch database, confirm
+the data is there. `db:backup` prints the restore command for exactly this
+reason.
+
+### Choices in the scripts
+
+- **`--format=custom`, not plain SQL.** The custom format is compressed and
+  is the only one `pg_restore` can restore _selectively_ (single table,
+  schema-only, data-only) or in parallel. A `.sql` dump can only be replayed
+  start to finish — the wrong property at the moment you need it most.
+- **`--single-transaction` on restore.** A failure halfway leaves the
+  database as it was, rather than half-restored. That intermediate state is
+  what turns a bad afternoon into a bad week.
+- **The restore script refuses non-local hosts.** It drops every object in
+  the target, so a stale `DATABASE_URL` pointing at something shared would be
+  unrecoverable. The guard is deliberately blunt: it protects against a tired
+  mistake, not an adversary.
+
+## Schema checks in CI
+
+Three checks run on every push (Issue 058):
+
+| Check                             | Catches                               |
+| --------------------------------- | ------------------------------------- |
+| `prisma validate`                 | A schema that isn't legal Prisma      |
+| `prisma format --check`           | Formatting drift between contributors |
+| `prisma migrate diff --exit-code` | **Schema/migration drift**            |
+
+The third is the one that matters. It replays every migration into a throwaway
+shadow database and asks whether the result matches `schema.prisma`.
+
+They diverge when someone edits the schema and forgets to generate a
+migration. Locally everything works — the Prisma client is generated _from
+`schema.prisma`_, so the new field exists and typechecks. In production only
+migrations run, so the column was never created and the first query against
+it fails. Catching that at merge instead of at deploy is the entire point.
+
+### Objects Prisma does not manage
+
+Two kinds of object in this schema exist only in migration SQL, because
+Prisma's schema language cannot express them:
+
+- The **partial unique index** on `organization_memberships` — `@@unique` has
+  no `WHERE` clause.
+- The **RLS policies** (Issue 052).
+
+They are applied by their migration and stay in the database, but Prisma will
+not recreate them if it regenerates the schema and will not warn you they
+exist. Treat them as append-only: add via raw SQL in a migration, never
+expect Prisma to manage them afterwards.
+
 ## Database-backed tests
 
 Tests needing a real Postgres live in `tests/integration/` and follow one

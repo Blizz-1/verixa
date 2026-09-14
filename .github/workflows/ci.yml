@@ -82,6 +82,31 @@ jobs:
       - name: Verify migrations apply to a fresh database
         run: pnpm db:migrate:deploy
 
+      # Schema hygiene (Issue 058). `validate` catches a schema that isn't
+      # legal Prisma; `format --check` keeps the file from drifting into
+      # whatever each contributor's editor does.
+      - name: Validate Prisma schema
+        run: pnpm --filter @verixa/database run db:validate
+
+      - name: Check Prisma schema formatting
+        run: pnpm --filter @verixa/database run db:format:check
+
+      # Drift detection: does replaying every migration actually produce the
+      # schema.prisma in the repo? They diverge when someone edits the schema
+      # and forgets to generate a migration — the edit works locally (the
+      # client is generated from schema.prisma) and then fails in production,
+      # where only migrations ran. Catching it at merge is the entire point.
+      #
+      # Needs a scratch database to replay migrations into; the service
+      # container above provides one.
+      - name: Check for schema/migration drift
+        env:
+          SHADOW_DATABASE_URL: postgres://verixa:verixa@localhost:5432/verixa_shadow
+        run: |
+          PGPASSWORD=verixa psql -h localhost -U verixa -d postgres -c "DROP DATABASE IF EXISTS verixa_shadow;"
+          PGPASSWORD=verixa psql -h localhost -U verixa -d postgres -c "CREATE DATABASE verixa_shadow;"
+          pnpm --filter @verixa/database run db:drift
+
       - name: Lint
         run: pnpm lint
 

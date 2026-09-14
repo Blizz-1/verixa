@@ -5,6 +5,8 @@ import type { InvitationRepository } from "../../application/ports/invitation-re
 import { Invitation, type InvitationId } from "../../domain/entities/invitation.js";
 import { Email } from "../../domain/value-objects/email.js";
 
+import { withMappedErrors } from "./error-mapper.js";
+
 /** Row ↔ aggregate translation for `Invitation`. */
 export const InvitationMapper = {
   toDomain(row: InvitationRow): Invitation {
@@ -72,11 +74,16 @@ export class PrismaInvitationRepository implements InvitationRepository {
   async save(invitation: Invitation): Promise<void> {
     const row = InvitationMapper.toRow(invitation);
     const { id, ...withoutId } = row;
-    await this.prisma.invitation.upsert({
-      where: { id },
-      create: row,
-      update: withoutId,
-    });
+    // Writes go through the mapper; reads don't. A read that violates a
+    // constraint isn't a thing — only writes produce conflicts a caller can
+    // act on. See error-mapper.ts.
+    await withMappedErrors("Invitation", () =>
+      this.prisma.invitation.upsert({
+        where: { id },
+        create: row,
+        update: withoutId,
+      }),
+    );
   }
 
   /**

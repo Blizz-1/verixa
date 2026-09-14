@@ -42,3 +42,7 @@ Thumbs.db
 
 # Claude Code local state
 .claude/
+
+# Local database dumps (Issue 057). Never committed: they contain real local
+# data and can be large.
+backups/
