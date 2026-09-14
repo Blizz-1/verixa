@@ -26,7 +26,7 @@ Full issue detail lives in `planning/issues/phase-XX-<slug>.md`.
 | 07 | 121–140 | Authorization — RBAC | Role/Permission entities, role assignment, permission checks, route guards, seed roles, admin role management API |
 | 08 | 141–160 | Authorization — ABAC / Policy Engine | Policy DSL, policy evaluation engine, resource-attribute conditions, policy testing tools, RBAC+ABAC composition |
 | 09 | 161–180 | Identity Verification | Verification request workflow, evidence submission, reviewer queue, verification status state machine, provider adapter interface |
-| 10 | 181–200 (+190A) | Audit Logging | Append-only audit event store, event schema, emitters across contexts, query/export API, tamper-evidence (hash chaining + optional Stellar external anchoring, ADR-0003) |
+| 10 | 181–200 (+190A–190D) | Audit Logging | Append-only audit event store, event schema, emitters across contexts, query/export API, tamper-evidence (hash chaining + optional Stellar external anchoring, ADR-0003) |
 | 11 | 201–220 | Security Hardening | Threat modeling docs, CSRF/CORS, security headers, secrets management, dependency scanning, brute-force protection, pen-test checklist |
 | 12 | 221–240 | API Layer — REST | OpenAPI-first route definitions, request validation, error response contract, pagination, versioning strategy, API key auth for machine clients |
 | 13 | 241–260 | API Layer — GraphQL & Gateway | GraphQL schema for governance/admin use cases, resolvers over existing use cases, gateway auth context, query complexity limits |
@@ -119,4 +119,5 @@ Full issue detail lives in `planning/issues/phase-XX-<slug>.md`.
 - [x] Issue 058 — Schema lint + drift detection in CI (implemented; `prisma validate`, `format --check`, and a shadow-database drift check. NOTE: the drift check's behavior against the unmanaged partial index / RLS policies is unverified locally — no shadow DB here — so CI is the first real test of it.)
 - [x] Issue 059 — Performance baseline (implemented; p50/p95/p99 benchmark script. Baseline table deliberately left unrecorded rather than populated from a CI runner — cross-machine numbers are meaningless and a wrong number carries more authority than a missing one.)
 - [x] Issue 060 — Persistence layer walkthrough (implemented; includes the two real bugs the contract suite caught, since those make the case better than the theory does.)
+- [ ] Issues 190B–190D — Stellar **mainnet** readiness: KMS-backed key management, funding/balance monitoring, and a rehearsed cutover runbook. Added because the gap was previously invisible: 190A is testnet-only, and shipping it to mainnet needs operational work that no issue covered.
 - [ ] Issues 061–500 — planned, not yet implemented (except 190A above)

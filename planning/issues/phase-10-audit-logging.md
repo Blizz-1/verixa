@@ -1,4 +1,4 @@
-# Phase 10 — Audit Logging (Issues 181–200, plus 190A)
+# Phase 10 — Audit Logging (Issues 181–200, plus 190A–190D)
 
 Builds `packages/audit`: an append-only, tamper-evident audit trail that subscribes
 to domain events across every prior context and exposes a query/export API.
@@ -327,3 +327,45 @@ independently-verifiable audit-chain commitments.
 **Deliverables:** Published tutorial.
 
 ---
+
+---
+
+### Issue 190B — Stellar anchoring key management (mainnet readiness)
+**Description:** Replace the plain `STELLAR_ANCHOR_SECRET_KEY` environment variable with a KMS/HSM-backed signing path, so the anchoring account's secret key is never held in application memory or configuration in production.
+**Objective:** Make mainnet anchoring operationally safe. The anchoring key signs real transactions that spend real XLM; a key in an env var is readable by anything that can read the process environment, a crash dump, or a misconfigured log.
+**Acceptance Criteria:** Signing goes through an interface with a KMS-backed implementation and a local dev implementation; the raw secret never appears in config, logs, or error output; a documented rotation procedure exists.
+**Dependencies:** 190A
+**Estimated Complexity:** M
+**Files Affected:** `packages/stellar-anchor/application/ports/transaction-signer.ts`, `infrastructure/kms-transaction-signer.ts`
+**Tests Required:** Unit tests against a fake signer; a test asserting the secret is absent from serialized config and error output.
+**Documentation Required:** `docs/security/stellar-key-management.md`
+**Educational Notes:** Why "it's in an environment variable" is not key management, and what an attacker gets from each disclosure path (env, crash dump, log, backup).
+**Deliverables:** KMS-backed signing path plus rotation runbook.
+
+---
+
+### Issue 190C — Stellar account funding monitor and alerting
+**Description:** Monitor the anchoring account's XLM balance and alert before it can no longer pay transaction fees; define the behavior when anchoring cannot proceed.
+**Objective:** Anchoring silently stopping is worse than anchoring never existing — the audit log would appear protected while no longer being anchored, and nobody would know until an integrity check failed months later.
+**Acceptance Criteria:** Balance exposed as a metric; alert fires below a configurable threshold; an unfundable anchor attempt surfaces as a loud, recorded failure rather than a swallowed error.
+**Dependencies:** 190A, 190B
+**Estimated Complexity:** S
+**Files Affected:** `packages/stellar-anchor/infrastructure/balance-monitor.ts`, observability wiring
+**Tests Required:** Tests for threshold breach and for the unfundable-anchor failure path.
+**Documentation Required:** `docs/guides/stellar-anchoring.md` operations section.
+**Educational Notes:** Silent degradation as a failure mode — a security control that stops working without announcing it is worse than one that was never installed, because it carries the same assurance with none of the protection.
+**Deliverables:** Balance monitoring, alerting, and a defined failure behavior.
+
+---
+
+### Issue 190D — Stellar testnet-to-mainnet migration runbook
+**Description:** Document and script the cutover from testnet to mainnet: account creation and funding, network passphrase configuration, a verification procedure proving anchors land on the public network, and a rollback path.
+**Objective:** Make the cutover a rehearsed procedure rather than an improvised one. Everything to date is testnet-only, where mistakes cost nothing; on mainnet they cost real funds and produce permanent public ledger entries.
+**Acceptance Criteria:** Runbook covers account setup, config changes, a dry run, verification that a known hash is retrievable from the public ledger, and what to do if anchoring must be disabled mid-flight.
+**Dependencies:** 190B, 190C
+**Estimated Complexity:** S
+**Files Affected:** `docs/runbooks/stellar-mainnet-cutover.md`
+**Tests Required:** N/A — the deliverable is a rehearsed procedure; the dry run is the test.
+**Documentation Required:** This issue's deliverable is the runbook.
+**Educational Notes:** Why "it worked on testnet" is not evidence for mainnet: different fees, different congestion, real irreversibility, and an account that must stay funded indefinitely.
+**Deliverables:** Cutover runbook, rehearsed at least once against testnet.
