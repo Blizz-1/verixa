@@ -357,6 +357,66 @@ app instances at 20 each is 200, and everything past 100 fails outright.
 Load testing that would validate these defaults empirically is Phase 23; the
 numbers here are conservative starting points, not measured optima.
 
+## Soft delete
+
+Users are never removed. `User.delete()` transitions status to `deleted` and
+stamps `deleted_at`; the row stays (Issue 054).
+
+**Why keep the row.** Everything that references a user by id has to stay
+resolvable. An audit entry reading "user X suspended user Y" is unreadable if
+Y's row is gone, and every foreign key pointing at a deleted user would have
+to be nulled or cascaded — losing exactly the history an audit trail exists to
+preserve. This is also why `organizations.owner_id` is `ON DELETE RESTRICT`:
+the schema is built on the assumption that accounts don't disappear.
+
+### Reading
+
+| Method                     | Deleted users |
+| -------------------------- | ------------- |
+| `findById`, `findByEmail`  | excluded      |
+| `findByIdIncludingDeleted` | included      |
+| `existsByEmail`            | **included**  |
+
+Exclusion is the default because it is what nearly every caller means, and
+because the safe failure is to not find someone rather than to resurrect them.
+
+The admin path is a **separate method**, not `findById(id, { includeDeleted:
+true })`. A boolean parameter can be handed a variable that happens to be
+`true`; a method name cannot. It also makes every privileged read greppable
+in review.
+
+`existsByEmail` including deleted users looks inconsistent and isn't. It
+answers "can this email be registered", and the unique index covers deleted
+rows too. If it ignored them, registration would pass its own check and then
+fail on a constraint violation at insert — a confusing 500 instead of a clean 409.
+
+### The consequence: a deleted user's email stays taken
+
+Because the unique index still covers the row, someone who deletes their
+account cannot re-register with the same address. That is a real limitation,
+stated here rather than discovered later.
+
+It is not fixed with a partial unique index. The proper fix is **anonymization
+at erasure time** (Phase 24): the retention job rewrites the address to
+something like `deleted-<uuid>@deleted.invalid`, which frees the original and
+removes the personal data at the same time. Soft delete handles "this account
+is gone"; erasure handles "this person's data is gone". They are different
+operations and both are needed.
+
+### Soft delete is not erasure
+
+Soft delete deliberately **retains personal data**. Under GDPR-style
+right-to-erasure, "we set a flag" is not deletion — the email, name, and every
+audit record still exist and are still readable.
+
+So Phase 24 must still implement genuine erasure, and the tension is real:
+erasure removes data that audit integrity wants kept. The usual resolution is
+to anonymize the personal fields while preserving the row and its id, so
+referential integrity and the shape of the audit trail survive while the
+identifying data does not. `deleted_at` is indexed specifically so that job
+can find candidates efficiently — "every user deleted more than N days ago" is
+a range scan over that column.
+
 ## Database-backed tests
 
 Tests needing a real Postgres live in `tests/integration/` and follow one

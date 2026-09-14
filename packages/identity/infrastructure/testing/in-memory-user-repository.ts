@@ -13,11 +13,18 @@ export class InMemoryUserRepository implements UserRepository {
   private readonly usersById = new Map<UserId, User>();
 
   findById(id: UserId): Promise<User | undefined> {
+    const user = this.usersById.get(id);
+    return Promise.resolve(user?.isDeleted === false ? user : undefined);
+  }
+
+  findByIdIncludingDeleted(id: UserId): Promise<User | undefined> {
     return Promise.resolve(this.usersById.get(id));
   }
 
   findByEmail(email: Email): Promise<User | undefined> {
-    return Promise.resolve([...this.usersById.values()].find((user) => user.email.equals(email)));
+    return Promise.resolve(
+      [...this.usersById.values()].find((user) => user.email.equals(email) && !user.isDeleted),
+    );
   }
 
   save(user: User): Promise<void> {
@@ -25,6 +32,7 @@ export class InMemoryUserRepository implements UserRepository {
     return Promise.resolve();
   }
 
+  /** Includes soft-deleted users, mirroring the unique index. See the port. */
   existsByEmail(email: Email): Promise<boolean> {
     return Promise.resolve([...this.usersById.values()].some((user) => user.email.equals(email)));
   }

@@ -76,6 +76,64 @@ export function userRepositoryContract(createRepository: () => UserRepository): 
       expect(found?.status).toBe("active");
     });
 
+    it("excludes soft-deleted users from findById", async () => {
+      const repository = createRepository();
+      const user = makeUser("alice@example.com");
+      await repository.save(user);
+
+      const deleted = user.delete("account closure");
+      if (!Result.isOk(deleted)) throw new Error("contract fixture setup failed");
+      await repository.save(deleted.value);
+
+      // The default read must not resurrect a deleted account. Failing to
+      // find someone is the safe outcome; returning them is not.
+      await expect(repository.findById(user.id)).resolves.toBeUndefined();
+    });
+
+    it("excludes soft-deleted users from findByEmail", async () => {
+      const repository = createRepository();
+      const user = makeUser("alice@example.com");
+      await repository.save(user);
+
+      const deleted = user.delete("account closure");
+      if (!Result.isOk(deleted)) throw new Error("contract fixture setup failed");
+      await repository.save(deleted.value);
+
+      await expect(repository.findByEmail(user.email)).resolves.toBeUndefined();
+    });
+
+    it("returns soft-deleted users from findByIdIncludingDeleted", async () => {
+      const repository = createRepository();
+      const user = makeUser("alice@example.com");
+      await repository.save(user);
+
+      const deleted = user.delete("account closure");
+      if (!Result.isOk(deleted)) throw new Error("contract fixture setup failed");
+      await repository.save(deleted.value);
+
+      // The admin/audit path. The row still exists — that is the whole point
+      // of soft delete — and this is the explicit way to reach it.
+      const found = await repository.findByIdIncludingDeleted(user.id);
+      expect(found?.id).toBe(user.id);
+      expect(found?.isDeleted).toBe(true);
+      expect(found?.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it("still reports a soft-deleted user's email as taken", async () => {
+      const repository = createRepository();
+      const user = makeUser("alice@example.com");
+      await repository.save(user);
+
+      const deleted = user.delete("account closure");
+      if (!Result.isOk(deleted)) throw new Error("contract fixture setup failed");
+      await repository.save(deleted.value);
+
+      // Unlike the finders, this must include deleted users: the unique index
+      // still covers their row. If it said "available", registration would
+      // pass its own check and then blow up on a constraint violation.
+      await expect(repository.existsByEmail(user.email)).resolves.toBe(true);
+    });
+
     it("existsByEmail is true only after the matching user is saved", async () => {
       const repository = createRepository();
       const user = makeUser("alice@example.com");

@@ -95,10 +95,20 @@ model User {
   createdAt DateTime @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @map("updated_at") @db.Timestamptz(3)
 
+  /// Set when the user is soft-deleted; NULL otherwise (Issue 054). Rows are
+  /// never removed — everything referencing a user by id must stay
+  /// resolvable, and `organizations.owner_id` is ON DELETE RESTRICT precisely
+  /// because hard deletion isn't how accounts go away here.
+  ///
+  /// Indexed because the erasure/retention job (Phase 24) scans by it: "every
+  /// user deleted more than N days ago" is a range query over this column.
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
   ownedOrganizations Organization[]           @relation("OrganizationOwner")
   memberships        OrganizationMembership[]
   sentInvitations    Invitation[]             @relation("InvitationInviter")
 
+  @@index([deletedAt])
   @@map("users")
 }
 

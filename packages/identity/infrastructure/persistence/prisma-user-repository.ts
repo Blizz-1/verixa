@@ -22,6 +22,14 @@ export class PrismaUserRepository implements UserRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async findById(id: UserId): Promise<User | undefined> {
+    // `findFirst`, not `findUnique`: adding the soft-delete filter makes this
+    // a compound condition, and Prisma's findUnique only accepts unique-key
+    // fields. Still an index lookup on the primary key.
+    const row = await this.prisma.user.findFirst({ where: { id, deletedAt: null } });
+    return row === null ? undefined : UserMapper.toDomain(row);
+  }
+
+  async findByIdIncludingDeleted(id: UserId): Promise<User | undefined> {
     const row = await this.prisma.user.findUnique({ where: { id } });
     return row === null ? undefined : UserMapper.toDomain(row);
   }
@@ -30,7 +38,9 @@ export class PrismaUserRepository implements UserRepository {
     // No `mode: "insensitive"` and no LOWER() wrapper: the column is `citext`,
     // so plain equality is already case-insensitive *and* uses the unique
     // index. See docs/guides/database.md.
-    const row = await this.prisma.user.findUnique({ where: { email: email.value } });
+    const row = await this.prisma.user.findFirst({
+      where: { email: email.value, deletedAt: null },
+    });
     return row === null ? undefined : UserMapper.toDomain(row);
   }
 
@@ -54,6 +64,10 @@ export class PrismaUserRepository implements UserRepository {
     // a yes/no answer, so it selects a single column instead of every column
     // and skips reconstructing an aggregate that would be thrown away. The
     // port documents this as the reason `existsByEmail` is its own method.
+    // Deliberately *not* filtered by deletedAt — see the port's soft-delete
+    // note. A deleted user still occupies the email in the unique index, so
+    // this has to agree with the constraint or registration fails at insert
+    // rather than returning a clean conflict.
     const found = await this.prisma.user.findUnique({
       where: { email: email.value },
       select: { id: true },

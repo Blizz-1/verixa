@@ -71,6 +71,7 @@ export const UserMapper = {
       status: row.status,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      deletedAt: row.deletedAt ?? undefined,
     });
   },
 
@@ -85,6 +86,7 @@ export const UserMapper = {
       status: user.status,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+      deletedAt: user.deletedAt ?? null,
     };
   },
 };

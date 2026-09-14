@@ -85,6 +85,7 @@ describe("UserRow type", () => {
       status: UserStatus.pending,
       createdAt: new Date(),
       updatedAt: new Date(),
+      deletedAt: null,
     };
 
     expect(row.id).toBe("00000000-0000-0000-0000-000000000001");

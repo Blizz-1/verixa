@@ -38,6 +38,15 @@ interface UserProps {
   readonly status: UserStatus;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+  /**
+   * When this user was soft-deleted, or `undefined` if they weren't.
+   *
+   * Redundant with `status === "deleted"` on purpose. The status drives
+   * behavior; this records *when*, which the status alone cannot — and which
+   * audit, retention schedules, and the eventual erasure job (Phase 24) all
+   * need. {@link User.reconstitute} rejects the two disagreeing.
+   */
+  readonly deletedAt?: Date | undefined;
   readonly domainEvents?: readonly DomainEvent[];
 }
 
@@ -57,6 +66,7 @@ export class User {
   readonly status: UserStatus;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+  readonly deletedAt: Date | undefined;
   private readonly domainEvents: readonly DomainEvent[];
 
   private constructor(props: UserProps) {
@@ -67,6 +77,7 @@ export class User {
     this.status = props.status;
     this.createdAt = props.createdAt;
     this.updatedAt = props.updatedAt;
+    this.deletedAt = props.deletedAt;
     this.domainEvents = props.domainEvents ?? [];
   }
 
@@ -100,6 +111,21 @@ export class User {
    * published, already was), not a new fact to report.
    */
   static reconstitute(props: UserProps): User {
+    // Loading skips transition validation by design, but this pair has to
+    // agree or every downstream consumer gets a different answer depending on
+    // which field it happens to read. A row where they disagree means the
+    // database and the domain have diverged — a data-integrity failure, not a
+    // recoverable input error, so it throws rather than returning a Result
+    // (see docs/guides/error-handling.md).
+    const isDeleted = props.status === "deleted";
+    if (isDeleted !== (props.deletedAt !== undefined)) {
+      throw new Error(
+        `User ${props.id} has status "${props.status}" but ` +
+          `${props.deletedAt === undefined ? "no" : "a"} deletedAt timestamp. ` +
+          "Soft-delete state is inconsistent.",
+      );
+    }
+
     return new User({ ...props, domainEvents: [] });
   }
 
@@ -139,9 +165,35 @@ export class User {
     return this.transitionTo("suspended", reason);
   }
 
-  /** Marks the user as `deleted`. Terminal — see {@link ALLOWED_TRANSITIONS}. */
+  /**
+   * Soft-deletes the user: marks the status `deleted` and stamps
+   * {@link deletedAt}. The row is never removed.
+   *
+   * Terminal — see {@link ALLOWED_TRANSITIONS}. Deleting keeps the row so
+   * that everything referencing this user by id stays resolvable: an audit
+   * entry saying "user X suspended user Y" is unreadable if Y's row is gone,
+   * and every foreign key pointing at it would have to be nulled or cascaded.
+   * See docs/guides/database.md on the tradeoffs, including why Phase 24
+   * still needs genuine erasure on top of this.
+   */
   delete(reason?: string): Result<User, ValidationError> {
-    return this.transitionTo("deleted", reason);
+    const transitioned = this.transitionTo("deleted", reason);
+    if (Result.isErr(transitioned)) {
+      return transitioned;
+    }
+
+    return Result.ok(
+      new User({
+        ...transitioned.value,
+        deletedAt: transitioned.value.updatedAt,
+        domainEvents: transitioned.value.pullDomainEvents(),
+      }),
+    );
+  }
+
+  /** Whether this user has been soft-deleted. */
+  get isDeleted(): boolean {
+    return this.status === "deleted";
   }
 
   /**

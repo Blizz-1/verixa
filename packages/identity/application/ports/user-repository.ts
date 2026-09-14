@@ -18,6 +18,28 @@ import type { Email } from "../../domain/value-objects/email.js";
  *   given, whether that `User` is new or previously existed. Callers don't
  *   distinguish "create" from "update" — the aggregate's own state is the
  *   only thing that matters.
+ *
+ * ## Soft-delete (Issue 054)
+ *
+ * Deleted users are never removed, only marked. The read methods therefore
+ * split into two kinds, and the split is deliberate rather than an options
+ * flag:
+ *
+ * - `findById`/`findByEmail` **exclude** soft-deleted users. This is the
+ *   default because it is what nearly every caller means, and because the
+ *   safe failure is to not find someone rather than to resurrect them.
+ * - `findByIdIncludingDeleted` is the explicit admin/audit escape hatch. A
+ *   separate method rather than `findById(id, { includeDeleted })` so the
+ *   intent is visible at the call site and greppable in review — a boolean
+ *   parameter can be passed a variable that is `true` by accident, a method
+ *   name cannot.
+ *
+ * - `existsByEmail` **includes** deleted users, unlike the finders. That is
+ *   not an inconsistency: it exists to answer "can this email be registered",
+ *   and the unique index covers deleted rows too. If it ignored them,
+ *   registration would pass its own check and then fail on a constraint
+ *   violation at insert — a confusing 500 instead of a clear conflict.
+ *
  * - `existsByEmail` is a separate method from `findByEmail`, not just sugar
  *   for `(await findByEmail(email)) !== undefined`, because the common
  *   caller (uniqueness validation before registering a new user) only needs
@@ -28,6 +50,7 @@ import type { Email } from "../../domain/value-objects/email.js";
 export interface UserRepository {
   findById(id: UserId): Promise<User | undefined>;
   findByEmail(email: Email): Promise<User | undefined>;
+  findByIdIncludingDeleted(id: UserId): Promise<User | undefined>;
   save(user: User): Promise<void>;
   existsByEmail(email: Email): Promise<boolean>;
 }

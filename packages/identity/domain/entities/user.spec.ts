@@ -98,6 +98,7 @@ describe("User", () => {
       status: "deleted",
       createdAt: original.createdAt,
       updatedAt: original.updatedAt,
+      deletedAt: original.updatedAt,
     });
 
     expect(rebuilt.status).toBe("deleted");
@@ -138,6 +139,67 @@ describe("User", () => {
     });
 
     expect(rebuilt.pullDomainEvents()).toHaveLength(0);
+  });
+
+  it("stamps deletedAt when soft-deleted", () => {
+    const result = makeUser().delete("account closure requested");
+
+    expect(Result.isOk(result) && result.value.status).toBe("deleted");
+    expect(Result.isOk(result) && result.value.deletedAt).toBeInstanceOf(Date);
+    expect(Result.isOk(result) && result.value.isDeleted).toBe(true);
+  });
+
+  it("leaves deletedAt unset for a user that was never deleted", () => {
+    const user = makeUser();
+
+    expect(user.deletedAt).toBeUndefined();
+    expect(user.isDeleted).toBe(false);
+  });
+
+  it("still records a UserStatusChanged event when soft-deleted", () => {
+    // The stamping of deletedAt rebuilds the aggregate, which is exactly where
+    // a carelessly-written `delete()` would drop the event it just recorded.
+    const result = makeUser().delete("account closure requested");
+    if (!Result.isOk(result)) throw new Error("fixture setup failed");
+
+    const events = result.value.pullDomainEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toBeInstanceOf(UserStatusChanged);
+  });
+
+  it("rejects reconstituting a deleted user with no deletedAt", () => {
+    const original = makeUser();
+
+    // Status and timestamp disagreeing means the database and the domain have
+    // diverged. Throwing beats silently picking one field to believe.
+    expect(() =>
+      User.reconstitute({
+        id: original.id,
+        email: original.email,
+        displayName: original.displayName,
+        personName: original.personName,
+        status: "deleted",
+        createdAt: original.createdAt,
+        updatedAt: original.updatedAt,
+      }),
+    ).toThrow(/inconsistent/i);
+  });
+
+  it("rejects reconstituting a live user that carries a deletedAt", () => {
+    const original = makeUser();
+
+    expect(() =>
+      User.reconstitute({
+        id: original.id,
+        email: original.email,
+        displayName: original.displayName,
+        personName: original.personName,
+        status: "active",
+        createdAt: original.createdAt,
+        updatedAt: original.updatedAt,
+        deletedAt: new Date(),
+      }),
+    ).toThrow(/inconsistent/i);
   });
 
   it("updates the display name and records a UserProfileUpdated event", () => {
