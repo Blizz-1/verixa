@@ -37,3 +37,13 @@ allowBuilds:
 # directly across a major version boundary.
 overrides:
   fast-uri: ">=4.1.2"
+  # nanoid <3.3.18: a custom generator with size 0 loops forever (GHSA,
+  # high). Transitive via the vitest/postcss chain, so an override is the
+  # only lever.
+  # Constrained to the 3.x line, not a bare ">=": an unbounded override
+  # resolved this to 6.x, and silently major-bumping a transitive dependency
+  # to fix a patch-level CVE trades a known bug for an unknown one.
+  nanoid: "^3.3.18"
+  # qs <6.16.0: denial of service via an attacker-controlled isBuffer.
+  # Transitive via the supertest/superagent chain used in integration tests.
+  qs: ">=6.16.0"
