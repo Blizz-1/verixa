@@ -12,10 +12,44 @@ provisions **two** databases on first start:
 - `verixa` — the development database, `DATABASE_URL` in `.env.example`
   points here.
 - `verixa_test` — a separate database for tests, `TEST_DATABASE_URL` points
-  here. Created by `infra/postgres/init-test-db.sh`, which the official
+  here. Created by `infra/postgres/01-init-test-db.sh`, which the official
   Postgres image runs automatically on first container start (anything
-  under `/docker-entrypoint-initdb.d/` executes once, the first time the
-  data volume is empty).
+  under `/docker-entrypoint-initdb.d/` executes once, in filename order, the
+  first time the data volume is empty).
+
+It also provisions **two roles**, in `infra/postgres/02-init-app-role.sh`.
+
+### Why the application does not connect as the superuser
+
+| Role         | Used by          | Privileges                         |
+| ------------ | ---------------- | ---------------------------------- |
+| `verixa`     | Migrations, psql | Superuser, owns every table        |
+| `verixa_app` | The running API  | `SELECT/INSERT/UPDATE/DELETE` only |
+
+**PostgreSQL superusers bypass row level security entirely** — the policies
+are not consulted at all. Every tenant-isolation policy in the RLS migration
+is, for a superuser connection, decoration.
+
+`FORCE ROW LEVEL SECURITY` on those tables closes the _owner_ half of this
+(an owner is otherwise exempt from policies on their own tables). It does
+nothing about superusers, so the second half is closed by simply not
+connecting as one.
+
+The failure this prevents is quiet, which is what makes it worth two roles.
+With the API connected as a superuser, a bug that forgot to set
+`app.current_organization_id` would read across every tenant, and no test
+would fail — the policy that should have stopped it was never evaluated.
+Multi-tenancy would look like it worked right up until it mattered.
+
+Migrations still run as `verixa`, because DDL needs the owner. That split is
+visible in the connection string rather than inferred from code paths:
+`docker-compose.yml` gives the `api` service the `verixa_app` URL, while
+`.env` keeps the owner URL for the Prisma CLI.
+
+> **Existing checkouts:** init scripts run only when the data directory is
+> empty. If your volume predates this, `docker compose down -v` and start
+> again, or the `verixa_app` role will not exist and the API will fail to
+> connect.
 
 ### Why tests need their own database, not the dev one
 
