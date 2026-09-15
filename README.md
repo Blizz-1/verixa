@@ -11,8 +11,11 @@ Every subsystem (credentials, sessions, RBAC, audit logging, etc.) is designed a
 an independently testable, independently reusable module under `packages/`,
 composed together by the HTTP API in `apps/api`.
 
-> **Status:** early scaffold. Only foundational tooling exists so far — see
-> [Roadmap](#roadmap) below.
+> **Status:** early, but running. Registration, login, account lockout, email
+> verification and password reset work end to end against Postgres, and the
+> audit log is anchored to Stellar. 70 of 500 planned issues are complete — see
+> [Roadmap](#roadmap). Sessions (Phase 05) are the next milestone and the
+> current limitation: login authenticates a user but does not yet issue a token.
 
 ## Why Verixa
 
@@ -20,6 +23,78 @@ Most auth/identity building blocks are either a SaaS you pay for and can't audit
 or a snippet you copy-paste and never fully understand. Verixa aims to be neither:
 a codebase you can read end to end, run yourself, and learn real architecture and
 security practice from — while still being solid enough to build on.
+
+## Verifiable audit logging on Stellar
+
+Verixa's audit log is **hash-chained** — every entry commits to its
+predecessor, so altering or removing one breaks every hash after it.
+
+That alone is weaker than it sounds, and Verixa says so rather than claiming
+otherwise. An attacker with write access to the database can rewrite the chain
+from any point and re-derive every subsequent hash; the result is internally
+consistent and indistinguishable from the truth. Hash chaining makes a log
+tamper-**evident to someone already holding an earlier hash**. It does not make
+it tamper-**proof**.
+
+Stellar is what closes that gap. The chain's head hash is committed to a
+Stellar transaction's `MEMO_HASH` — 32 bytes, exactly the size of a SHA-256
+digest, so the hash goes in whole. Rewriting history now also requires altering
+a public ledger the operator does not control.
+
+The property that matters is **independent verifiability**: an auditor, a
+regulator, or a suspicious user can check the log against the ledger with no
+access to, and no trust in, the operator's systems.
+
+### Try it — no database, no configuration
+
+```bash
+pnpm install
+pnpm --filter @verixa/audit demo
+```
+
+It funds a throwaway testnet account from friendbot, records audit events,
+chains them, anchors the head, then verifies the commitment by reading it back
+off the ledger the way a third party would — and confirms a tampered hash is
+rejected.
+
+A real run:
+
+```
+4. Anchoring the chain head to Stellar
+   transaction: 21267a74f69d019fa40c1f93a6953896113ae2ee0e62af35326852a86a07d775
+   covers:      3 entries, through sequence 3
+
+5. Verifying the commitment from the public ledger
+   ledger commits to the head hash: true
+
+6. Confirming a tampered hash is rejected
+   altered hash verifies: false  (must be false)
+```
+
+That transaction is on the public testnet ledger:
+**[stellar.expert](https://stellar.expert/explorer/testnet/tx/21267a74f69d019fa40c1f93a6953896113ae2ee0e62af35326852a86a07d775)**
+— its memo is the audit log's head hash.
+
+### Only the hash
+
+Audit _content_ never leaves the operator's database. Audit records are exactly
+the records most likely to contain something sensitive, and a public ledger is
+irreversible. A digest proves the records existed unchanged while revealing
+nothing about them.
+
+### Honest scope
+
+- **Testnet today.** Mainnet needs KMS-backed key management, funding and
+  balance monitoring, and a rehearsed cutover — tracked as issues 190B–190D and
+  not yet done.
+- **Anchoring is scheduled, not per-entry.** A transaction per login would cost
+  a fee and seconds each time and buy little, since the chain already links
+  entries; anchoring the head commits to everything beneath it. How often is the
+  operator's knob, and it bounds the window for undetected tampering.
+- **Ledger-agnostic by construction.** Nothing above the adapter mentions
+  Stellar. `HashAnchor` is the port; `StellarHashAnchor` is one implementation.
+
+See `docs/adr/0003-stellar-audit-anchoring.md` for the full rationale.
 
 ## Architecture
 
