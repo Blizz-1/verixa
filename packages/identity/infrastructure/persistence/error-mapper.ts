@@ -1,4 +1,4 @@
-import { Prisma } from "@verixa/database";
+import { PrismaClientKnownRequestError } from "@verixa/database";
 import { ConflictError, NotFoundError } from "@verixa/shared-kernel";
 
 /**
@@ -33,8 +33,8 @@ const RECORD_NOT_FOUND = "P2025";
 /** Foreign key constraint violation. */
 const FOREIGN_KEY_VIOLATION = "P2003";
 
-function isKnownRequestError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
-  return error instanceof Prisma.PrismaClientKnownRequestError;
+function isKnownRequestError(error: unknown): error is PrismaClientKnownRequestError {
+  return error instanceof PrismaClientKnownRequestError;
 }
 
 /**
@@ -46,7 +46,7 @@ function isKnownRequestError(error: unknown): error is Prisma.PrismaClientKnownR
  * guaranteed field name would be relying on an implementation detail of the
  * driver.
  */
-function violatedFields(error: Prisma.PrismaClientKnownRequestError): string[] {
+function violatedFields(error: PrismaClientKnownRequestError): string[] {
   const target: unknown = error.meta?.["target"];
   if (Array.isArray(target)) {
     return target.filter((value): value is string => typeof value === "string");

@@ -42,7 +42,22 @@ interface PlanRow {
 describe.skipIf(!available)("index usage (Issue 055)", () => {
   const prisma = createTestPrismaClient();
 
-  /** Runs EXPLAIN (no ANALYZE) and returns the plan as one string. */
+  /**
+   * Runs EXPLAIN (no ANALYZE) and returns the plan as one string.
+   *
+   * Every placeholder below carries an explicit `::type` cast, and that is
+   * load-bearing rather than decorative. `$queryRawUnsafe` binds parameters
+   * as `text`, so an uncast `WHERE email = $1` asks Postgres to compare
+   * `citext` against `text`. It resolves that by casting the *column*, and
+   * the plan comes back reading `Filter: ((email)::text = '...'::text)` — a
+   * sequential scan, because an index on `email` cannot answer a query about
+   * `email::text`. On a uuid column it does not even get that far: there is
+   * no `uuid = text` operator, so it fails outright with 42883.
+   *
+   * Both are artefacts of raw SQL in this file, not of the schema — Prisma's
+   * generated queries bind with the correct types. Casting the parameter
+   * instead of the column is what makes these assertions measure the schema.
+   */
   async function explain(sql: string, ...params: unknown[]): Promise<string> {
     const rows = await prisma.$queryRawUnsafe<PlanRow[]>(`EXPLAIN ${sql}`, ...params);
     return rows.map((row) => row["QUERY PLAN"]).join("\n");
@@ -100,6 +115,22 @@ describe.skipIf(!available)("index usage (Issue 055)", () => {
     }));
     await prisma.user.createMany({ data: users });
 
+    // Organizations get bulked up too. With a single row, a sequential scan
+    // is the *correct* plan and asserting an index scan would be asserting
+    // that the planner is wrong — the same trap this file's header warns
+    // about. Only the row count makes the slug assertion meaningful.
+    await prisma.organization.createMany({
+      data: Array.from({ length: ROW_COUNT }, (_unused, offset) => ({
+        id: randomUUID(),
+        name: `Bulk Org ${String(offset)}`,
+        slug: `bulk-org-${String(offset)}`,
+        ownerId: OWNER_ID,
+        status: "active" as const,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    });
+
     await prisma.organizationMembership.createMany({
       data: users.slice(0, ROW_COUNT).map((user) => ({
         id: randomUUID(),
@@ -141,7 +172,10 @@ describe.skipIf(!available)("index usage (Issue 055)", () => {
   }, 120_000);
 
   it("looks up a user by email via the unique index", async () => {
-    const plan = await explain("SELECT * FROM users WHERE email = $1", "index-owner@example.com");
+    const plan = await explain(
+      "SELECT * FROM users WHERE email = $1::citext",
+      "index-owner@example.com",
+    );
 
     // Also the payoff of `citext` over `text` + a LOWER() functional index:
     // plain equality is index-backed with no wrapper at the call site.
@@ -149,20 +183,23 @@ describe.skipIf(!available)("index usage (Issue 055)", () => {
   });
 
   it("looks up an organization by slug via the unique index", async () => {
-    const plan = await explain("SELECT * FROM organizations WHERE slug = $1", "index-org");
+    const plan = await explain("SELECT * FROM organizations WHERE slug = $1::citext", "index-org");
 
     expectIndexed(plan, "organizations");
   });
 
   it("looks up an invitation by token hash via the unique index", async () => {
-    const plan = await explain("SELECT * FROM invitations WHERE token_hash = $1", "0".repeat(64));
+    const plan = await explain(
+      "SELECT * FROM invitations WHERE token_hash = $1::text",
+      "0".repeat(64),
+    );
 
     expectIndexed(plan, "invitations");
   });
 
   it("finds a user's membership in an organization via the composite index", async () => {
     const plan = await explain(
-      "SELECT * FROM organization_memberships WHERE user_id = $1 AND organization_id = $2",
+      "SELECT * FROM organization_memberships WHERE user_id = $1::uuid AND organization_id = $2::uuid",
       OWNER_ID,
       ORG_ID,
     );
@@ -172,7 +209,7 @@ describe.skipIf(!available)("index usage (Issue 055)", () => {
 
   it("finds pending invitations for an organization via the composite index", async () => {
     const plan = await explain(
-      "SELECT * FROM invitations WHERE organization_id = $1 AND status = 'pending' LIMIT 50",
+      "SELECT * FROM invitations WHERE organization_id = $1::uuid AND status = 'pending' LIMIT 50",
       ORG_ID,
     );
 
@@ -184,7 +221,7 @@ describe.skipIf(!available)("index usage (Issue 055)", () => {
     // invitations expiring in the next minute is selective, so an index is
     // the right plan. Asking for all of them would correctly seq-scan.
     const plan = await explain(
-      "SELECT * FROM invitations WHERE expires_at < $1",
+      "SELECT * FROM invitations WHERE expires_at < $1::timestamptz",
       new Date(Date.now() - 86_400_000),
     );
 
@@ -197,7 +234,7 @@ describe.skipIf(!available)("index usage (Issue 055)", () => {
     // column. That is why `@@index([organizationId])` exists separately and
     // is not redundant, which is the least obvious call in this schema.
     const plan = await explain(
-      "SELECT * FROM organization_memberships WHERE organization_id = $1 LIMIT 50",
+      "SELECT * FROM organization_memberships WHERE organization_id = $1::uuid LIMIT 50",
       ORG_ID,
     );
 
