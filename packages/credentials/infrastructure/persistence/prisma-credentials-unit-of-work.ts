@@ -7,6 +7,10 @@ import type {
 } from "../../application/ports/credentials-unit-of-work.js";
 
 import { PrismaCredentialRepository } from "./prisma-credential-repository.js";
+import {
+  PrismaEmailVerificationTokenRepository,
+  PrismaPasswordResetTokenRepository,
+} from "./prisma-verification-token-repositories.js";
 
 /**
  * `CredentialsUnitOfWork` over Prisma's interactive transactions.
@@ -27,6 +31,10 @@ export class PrismaCredentialsUnitOfWork implements CredentialsUnitOfWork {
       const repositories: CredentialsRepositories = {
         users: new PrismaUserRepository(client),
         credentials: new PrismaCredentialRepository(client),
+        emailVerificationTokens: new PrismaEmailVerificationTokenRepository(
+          client.emailVerificationToken,
+        ),
+        passwordResetTokens: new PrismaPasswordResetTokenRepository(client.passwordResetToken),
       };
 
       return work(repositories);

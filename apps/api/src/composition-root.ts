@@ -2,8 +2,14 @@ import { loadConfig } from "@verixa/config";
 import {
   Argon2PasswordHasher,
   AuthenticateWithPassword,
+  ConfirmEmailVerification,
+  ConfirmPasswordReset,
+  NoSessionsRevoker,
+  NullCredentialNotifier,
   PrismaCredentialsUnitOfWork,
   RegisterUserWithPassword,
+  RequestEmailVerification,
+  RequestPasswordReset,
 } from "@verixa/credentials";
 import { PrismaClient } from "@verixa/database";
 import {
@@ -80,6 +86,10 @@ export interface IdentityUseCases {
 export interface CredentialUseCases {
   readonly registerUserWithPassword: RegisterUserWithPassword;
   readonly authenticateWithPassword: AuthenticateWithPassword;
+  readonly requestEmailVerification: RequestEmailVerification;
+  readonly confirmEmailVerification: ConfirmEmailVerification;
+  readonly requestPasswordReset: RequestPasswordReset;
+  readonly confirmPasswordReset: ConfirmPasswordReset;
 }
 
 export interface Container {
@@ -110,6 +120,23 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
   const passwordHasher = new Argon2PasswordHasher();
   const credentialsUnitOfWork = new PrismaCredentialsUnitOfWork(prisma);
 
+  // Both of these are placeholders for later phases, and both are wired to
+  // real call sites rather than left as TODOs.
+  //
+  // `NullCredentialNotifier` delivers nothing — mail is Phase 14. It is
+  // deliberately silent rather than a stub that logs "would have sent:
+  // <token>", which is the version that survives in production for a
+  // fortnight while every reset token in the system lands in a log
+  // aggregator.
+  //
+  // `NoSessionsRevoker` is *correct* today, not a stub: sessions are Phase
+  // 05, so revoking all of them is genuinely a no-op. Having the call site
+  // exist now is what stops "invalidate sessions on password reset" becoming
+  // a step someone has to remember to add later — the most commonly missed
+  // part of a reset flow.
+  const credentialNotifier = new NullCredentialNotifier();
+  const sessionRevoker = new NoSessionsRevoker();
+
   // PrismaOrganizationRepository and PrismaOrganizationMembershipRepository
   // aren't constructed here: the only use case that touches them
   // (CreateOrganization) reaches them through the unit of work, since its two
@@ -136,6 +163,17 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
       // account exists is cached per hasher, so a second instance would build
       // its own on the first failed login.
       authenticateWithPassword: new AuthenticateWithPassword(credentialsUnitOfWork, passwordHasher),
+      requestEmailVerification: new RequestEmailVerification(
+        credentialsUnitOfWork,
+        credentialNotifier,
+      ),
+      confirmEmailVerification: new ConfirmEmailVerification(credentialsUnitOfWork),
+      requestPasswordReset: new RequestPasswordReset(credentialsUnitOfWork, credentialNotifier),
+      confirmPasswordReset: new ConfirmPasswordReset(
+        credentialsUnitOfWork,
+        passwordHasher,
+        sessionRevoker,
+      ),
     },
     dispose: async () => {
       await prisma.$disconnect();

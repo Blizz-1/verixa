@@ -212,6 +212,115 @@ Two properties worth knowing:
   would turn a cosmetic problem into an outage, and the upgrade is retried on
   their next login anyway.
 
+## Email verification and password reset
+
+Both issue a **single-use, expiring, hashed** token. Implementation:
+`packages/credentials/domain/entities/email-verification-token.ts` and
+`password-reset-token.ts`.
+
+|                | Verification                    | Reset          |
+| -------------- | ------------------------------- | -------------- |
+| Lifetime       | 24 hours                        | 1 hour         |
+| Grants         | Activation of a pending account | A new password |
+| Failure detail | Reported                        | Withheld       |
+
+### Why tokens are hashed, but not with argon2
+
+Only a SHA-256 digest is stored. A leaked table therefore yields nothing
+usable — the raw value exists exactly once, in the email that was sent.
+
+The difference from password storage looks like an inconsistency and is not.
+Password hashing is slow _on purpose_ because passwords are low-entropy and
+human-chosen: without a deliberate cost, `Summer2026!` falls in microseconds.
+These tokens are 256 random bits from a CSPRNG. There is no dictionary to try
+and no guess worth making, so slowness would buy nothing while costing real
+latency on a link a user just clicked.
+
+Comparison is still constant-time. `===` on hex strings returns faster the
+earlier the first difference appears, which is enough to reconstruct a value
+character by character given samples. It compares _digests_ rather than raw
+tokens, so this is belt-and-braces — the right place for a two-line function.
+
+### Why single-use matters more than it looks
+
+A link travels through channels nobody controls: a mail provider, a corporate
+scanner that follows links, a forwarded message, a shared inbox, browser
+history on a borrowed laptop. A reusable link is a permanent credential
+scattered across all of them.
+
+For reset this is sharper still. A reusable reset link in an old email is a
+backdoor that **survives every subsequent password change** — the user picks a
+new password, believes they are safe, and the link still works.
+
+Issuing a new token retires every outstanding one, for the same reason.
+
+### Where the enumeration rule applies, and where it does not
+
+Both _request_ endpoints return success unconditionally — unknown address,
+already-verified account, an SSO-only account with no password. A reset
+endpoint that says "no account with that address" is a **better** oracle than
+the login form, because it needs no password guess at all: one request per
+address and you have the answer.
+
+Whether anything happened is observable only internally. That is what `issued`
+on the result object is for, and it must never reach a client — it exists so
+tests and audit can verify the behaviour, since the response carries no
+difference to assert on.
+
+**Confirmation is where the rule stops.** `ConfirmEmailVerification`
+distinguishes "expired" from "already used", and that is deliberate. Reaching
+it requires already holding a 256-bit token, which only arrives by controlling
+the mailbox — there is nothing left to enumerate, and the two cases lead to
+different actions ("request another" versus "you are already verified, just
+sign in"). Copying the login rule here would make the product worse for no
+security gain, which is the failure mode of applying a principle without its
+reason.
+
+`ConfirmPasswordReset` does **not** make that concession, because the stakes
+differ: an attacker holding a used reset token learns from "already used" that
+it was real and that the account exists. Expired leaks the same. One message
+for all three.
+
+An unknown token is always reported identically to an expired one. That one
+_is_ a guess.
+
+### Why a reset must revoke sessions
+
+The most commonly missed step in the flow, and the reason it exists.
+
+The scenario a reset is for is "someone else has my account". If they got in,
+they are holding a **session**. Replacing the password revokes their knowledge
+of the credential and does nothing at all about the session they already have.
+They stay signed in, indefinitely, while the user believes they have just
+locked them out.
+
+The danger is not that the reset is insecure — it is that it is _believed to
+have worked_. A user who knows they are still compromised takes further action;
+one who thinks they are safe does not.
+
+Sessions are Phase 05, so `SessionRevoker` has no real implementation yet.
+`NoSessionsRevoker` is genuinely correct today — there are no sessions to
+revoke — and the call site exists now so that "remember to revoke sessions"
+never has to be remembered.
+
+When revocation fails, the error says so rather than reporting success: the
+password _did_ change, and the user needs to know their old sessions survived.
+That is the one place in these flows where a failure is surfaced rather than
+swallowed, and the asymmetry is the point — a failed notification costs an
+email nobody received, a failed revocation costs a false sense of safety.
+
+### Deliberately not solved
+
+Nothing rate-limits the request endpoints. Anyone can trigger verification or
+reset emails to any address as fast as they can post, which is both a
+mail-bombing vector and a way to repeatedly invalidate a real user's
+outstanding link. That is Phase 15's job, and a real gap until then.
+
+Delivery is also not implemented — `NullCredentialNotifier` sends nothing until
+Phase 14. It is silent rather than logging "would have sent: &lt;token&gt;",
+because that version is the one that survives in production for a fortnight
+while every reset token in the system lands in a log aggregator.
+
 ## What login does not yet do
 
 `POST /auth/login` returns the authenticated user and **no session or token**.

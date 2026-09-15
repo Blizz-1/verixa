@@ -6,6 +6,10 @@ import type {
 } from "../../application/ports/credentials-unit-of-work.js";
 
 import { InMemoryCredentialRepository } from "./in-memory-credential-repository.js";
+import {
+  InMemoryEmailVerificationTokenRepository,
+  InMemoryPasswordResetTokenRepository,
+} from "./in-memory-verification-token-repositories.js";
 
 /**
  * `CredentialsUnitOfWork` over in-memory fakes.
@@ -23,6 +27,10 @@ export class InMemoryCredentialsUnitOfWork implements CredentialsUnitOfWork {
     this.repositories = {
       users: repositories?.users ?? new InMemoryUserRepository(),
       credentials: repositories?.credentials ?? new InMemoryCredentialRepository(),
+      emailVerificationTokens:
+        repositories?.emailVerificationTokens ?? new InMemoryEmailVerificationTokenRepository(),
+      passwordResetTokens:
+        repositories?.passwordResetTokens ?? new InMemoryPasswordResetTokenRepository(),
     };
   }
 

@@ -3,6 +3,23 @@
 
 // Domain
 export {
+  EmailVerificationToken,
+  type EmailVerificationTokenId,
+  type EmailVerificationUserId,
+  type IssuedEmailVerificationToken,
+} from "./domain/entities/email-verification-token.js";
+export {
+  type IssuedPasswordResetToken,
+  PasswordResetToken,
+  type PasswordResetTokenId,
+  type PasswordResetUserId,
+} from "./domain/entities/password-reset-token.js";
+export {
+  generateToken,
+  hashToken,
+  tokenMatchesDigest,
+} from "./domain/value-objects/token-digest.js";
+export {
   Credential,
   type CredentialId,
   type CredentialUserId,
@@ -20,7 +37,16 @@ export {
 } from "./domain/value-objects/raw-password.js";
 
 // Application: ports
+export {
+  type CredentialNotifier,
+  NullCredentialNotifier,
+} from "./application/ports/credential-notifier.js";
 export type { CredentialRepository } from "./application/ports/credential-repository.js";
+export { NoSessionsRevoker, type SessionRevoker } from "./application/ports/session-revoker.js";
+export type {
+  EmailVerificationTokenRepository,
+  PasswordResetTokenRepository,
+} from "./application/ports/verification-token-repository.js";
 export type {
   CredentialsRepositories,
   CredentialsUnitOfWork,
@@ -28,6 +54,26 @@ export type {
 export type { PasswordHasher } from "./application/ports/password-hasher.js";
 
 // Application: use cases
+export {
+  ConfirmEmailVerification,
+  type ConfirmEmailVerificationCommand,
+  type ConfirmEmailVerificationResult,
+} from "./application/use-cases/confirm-email-verification.js";
+export {
+  ConfirmPasswordReset,
+  type ConfirmPasswordResetCommand,
+  type ConfirmPasswordResetResult,
+} from "./application/use-cases/confirm-password-reset.js";
+export {
+  RequestEmailVerification,
+  type RequestEmailVerificationCommand,
+  type RequestEmailVerificationResult,
+} from "./application/use-cases/request-email-verification.js";
+export {
+  RequestPasswordReset,
+  type RequestPasswordResetCommand,
+  type RequestPasswordResetResult,
+} from "./application/use-cases/request-password-reset.js";
 export {
   AuthenticateWithPassword,
   type AuthenticateWithPasswordCommand,
@@ -52,3 +98,9 @@ export {
   PrismaCredentialRepository,
 } from "./infrastructure/persistence/prisma-credential-repository.js";
 export { PrismaCredentialsUnitOfWork } from "./infrastructure/persistence/prisma-credentials-unit-of-work.js";
+export {
+  EmailVerificationTokenMapper,
+  PasswordResetTokenMapper,
+  PrismaEmailVerificationTokenRepository,
+  PrismaPasswordResetTokenRepository,
+} from "./infrastructure/persistence/prisma-verification-token-repositories.js";

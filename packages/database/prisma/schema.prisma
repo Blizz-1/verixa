@@ -104,10 +104,12 @@ model User {
   /// user deleted more than N days ago" is a range query over this column.
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
 
-  credential         Credential?
-  ownedOrganizations Organization[]           @relation("OrganizationOwner")
-  memberships        OrganizationMembership[]
-  sentInvitations    Invitation[]             @relation("InvitationInviter")
+  credential              Credential?
+  ownedOrganizations      Organization[]           @relation("OrganizationOwner")
+  memberships             OrganizationMembership[]
+  sentInvitations         Invitation[]             @relation("InvitationInviter")
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
 
   @@index([deletedAt])
   @@map("users")
@@ -301,4 +303,65 @@ model Credential {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("credentials")
+}
+
+/// Proof that someone controls the email address they registered with
+/// (Issue 068).
+///
+/// Only the SHA-256 digest is stored, never the token. A leaked table is
+/// therefore useless: the raw value exists exactly once, in the email that
+/// was sent, and is unrecoverable from here.
+model EmailVerificationToken {
+  id String @id @db.Uuid
+
+  userId String @map("user_id") @db.Uuid
+
+  /// Hex-encoded SHA-256. Unique so a digest collision -- or a replayed
+  /// insert -- is a constraint violation rather than two tokens that both
+  /// work.
+  tokenHash String @unique @map("token_hash")
+
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  /// When the token was redeemed. Null means unused.
+  ///
+  /// A timestamp rather than a `used` boolean, because "when" is what an
+  /// audit answers questions with, and the boolean is derivable from it while
+  /// the reverse is not.
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt  DateTime  @map("created_at") @db.Timestamptz(3)
+
+  /// `Cascade`: a verification token for a deleted user is unusable by
+  /// definition, and keeping it would retain a link between an address and an
+  /// account that no longer exists.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Supports "the outstanding tokens for this user", which both the reissue
+  /// path and the Phase 24 retention sweep need.
+  @@index([userId])
+  /// Supports the expiry sweep.
+  @@index([expiresAt])
+  @@map("email_verification_tokens")
+}
+
+/// Authority to set a new password without knowing the old one (Issue 069).
+///
+/// The most dangerous token in the system: holding one is equivalent to
+/// holding the account. Same storage rules as above, a much shorter lifetime,
+/// and the same single-use guarantee.
+model PasswordResetToken {
+  id String @id @db.Uuid
+
+  userId String @map("user_id") @db.Uuid
+
+  tokenHash String @unique @map("token_hash")
+
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt  DateTime  @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
