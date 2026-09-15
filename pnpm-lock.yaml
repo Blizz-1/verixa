@@ -115,6 +115,12 @@ importers:
       '@node-rs/argon2':
         specifier: ^2.0.2
         version: 2.2.1
+      '@verixa/database':
+        specifier: workspace:*
+        version: link:../database
+      '@verixa/identity':
+        specifier: workspace:*
+        version: link:../identity
       '@verixa/shared-kernel':
         specifier: workspace:*
         version: link:../shared-kernel
@@ -237,9 +243,15 @@ importers:
       '@verixa/api':
         specifier: workspace:*
         version: link:../apps/api
+      '@verixa/credentials':
+        specifier: workspace:*
+        version: link:../packages/credentials
       '@verixa/database':
         specifier: workspace:*
         version: link:../packages/database
+      '@verixa/identity':
+        specifier: workspace:*
+        version: link:../packages/identity
       '@verixa/shared-kernel':
         specifier: workspace:*
         version: link:../packages/shared-kernel

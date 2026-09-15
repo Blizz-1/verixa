@@ -104,6 +104,7 @@ model User {
   /// user deleted more than N days ago" is a range query over this column.
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
 
+  credential         Credential?
   ownedOrganizations Organization[]           @relation("OrganizationOwner")
   memberships        OrganizationMembership[]
   sentInvitations    Invitation[]             @relation("InvitationInviter")
@@ -252,4 +253,36 @@ model Invitation {
   @@index([expiresAt])
   @@index([organizationId, status])
   @@map("invitations")
+}
+
+/// How a user proves who they are. Separate from `User` deliberately — see
+/// packages/credentials/domain/entities/credential.ts.
+///
+/// One-to-one *optional*: a user may have no credential at all. SSO-only,
+/// passkey-only, and service accounts are all legitimately password-less, and
+/// modelling that as an absent row states it exactly, where a nullable column
+/// on `users` would state it only by convention.
+model Credential {
+  id String @id @db.Uuid
+
+  /// Unique, enforcing one password credential per user at the database
+  /// level. A second row would mean two valid passwords for one account, with
+  /// nothing to say which is authoritative.
+  userId String @unique @map("user_id") @db.Uuid
+
+  /// The full PHC string (`$argon2id$v=19$m=...$salt$hash`), not a bare
+  /// digest. Parameters and salt travel with it, which is what keeps old
+  /// hashes verifiable after the cost settings are raised.
+  passwordHash String @map("password_hash")
+
+  createdAt DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(3)
+
+  /// `Cascade`, unlike most relations here. A credential has no meaning
+  /// without its user, and leaving an orphaned password hash behind after a
+  /// user is erased would be retaining exactly the data that most needed to
+  /// go.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("credentials")
 }

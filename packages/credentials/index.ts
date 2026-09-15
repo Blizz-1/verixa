@@ -1,9 +1,43 @@
 // Curated public surface of @verixa/credentials. Deep imports are blocked by
 // the boundary rule in eslint.config.mjs — see docs/guides/domain-modeling.md.
 
+// Domain
+export {
+  Credential,
+  type CredentialId,
+  type CredentialUserId,
+} from "./domain/entities/credential.js";
+export {
+  type BreachedPasswordChecker,
+  DEFAULT_PASSWORD_POLICY,
+  type PasswordPolicy,
+  RawPassword,
+} from "./domain/value-objects/raw-password.js";
+
+// Application: ports
+export type { CredentialRepository } from "./application/ports/credential-repository.js";
+export type {
+  CredentialsRepositories,
+  CredentialsUnitOfWork,
+} from "./application/ports/credentials-unit-of-work.js";
 export type { PasswordHasher } from "./application/ports/password-hasher.js";
+
+// Application: use cases
+export {
+  RegisterUserWithPassword,
+  type RegisterUserWithPasswordCommand,
+  type RegisterUserWithPasswordError,
+  type RegisterUserWithPasswordResult,
+} from "./application/use-cases/register-user-with-password.js";
+
+// Infrastructure
 export {
   Argon2PasswordHasher,
-  DEFAULT_ARGON2_PARAMETERS,
   type Argon2Parameters,
+  DEFAULT_ARGON2_PARAMETERS,
 } from "./infrastructure/argon2-password-hasher.js";
+export {
+  CredentialMapper,
+  PrismaCredentialRepository,
+} from "./infrastructure/persistence/prisma-credential-repository.js";
+export { PrismaCredentialsUnitOfWork } from "./infrastructure/persistence/prisma-credentials-unit-of-work.js";

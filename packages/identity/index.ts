@@ -78,3 +78,9 @@ export { PrismaUnitOfWork } from "./infrastructure/persistence/prisma-unit-of-wo
 export type { IdentityRepositories, UnitOfWork } from "./application/ports/unit-of-work.js";
 export type { IssuedInvitation } from "./domain/entities/invitation.js";
 export { withTenantContext } from "./infrastructure/persistence/prisma-tenant-context.js";
+
+// Testing fakes. Exported so contexts built on top of identity (credentials,
+// sessions) can test their own use cases against the same fake identity
+// repositories, rather than each re-implementing one that drifts.
+export { InMemoryUserRepository } from "./infrastructure/testing/in-memory-user-repository.js";
+export { InMemoryUnitOfWork } from "./infrastructure/testing/in-memory-unit-of-work.js";

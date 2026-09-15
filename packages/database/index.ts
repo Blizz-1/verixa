@@ -21,6 +21,7 @@ export {
 // adapters (Issue 046 onward) map between these and the domain entities;
 // nothing outside an adapter should ever hold one.
 export type {
+  Credential as CredentialRow,
   Invitation as InvitationRow,
   Organization as OrganizationRow,
   OrganizationMembership as OrganizationMembershipRow,
