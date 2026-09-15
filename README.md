@@ -133,6 +133,10 @@ pnpm install
 pnpm --filter @verixa/api dev
 ```
 
+`pnpm install` also generates the Prisma client, which is platform-specific
+and therefore never committed — see
+[`docs/guides/database.md`](docs/guides/database.md).
+
 The API starts on `http://localhost:3000` (override with `PORT`). Verify it's up:
 
 ```bash
