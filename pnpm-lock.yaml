@@ -283,6 +283,9 @@ importers:
       '@verixa/api':
         specifier: workspace:*
         version: link:../apps/api
+      '@verixa/audit':
+        specifier: workspace:*
+        version: file:packages/audit(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(supports-color@7.2.0)(typescript@5.9.3)
       '@verixa/credentials':
         specifier: workspace:*
         version: link:../packages/credentials
