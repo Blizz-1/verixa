@@ -1,10 +1,43 @@
+import { fileURLToPath } from "node:url";
+
 import { defineConfig, mergeConfig } from "vitest/config";
 
 import baseConfig from "../vitest.config.js";
 
+const packageEntry = (name: string): string =>
+  fileURLToPath(new URL(`../packages/${name}/index.ts`, import.meta.url));
+
 export default mergeConfig(
   baseConfig,
   defineConfig({
+    /**
+     * Resolves two workspace packages to their source rather than their build
+     * output.
+     *
+     * `injectWorkspacePackages: true` — required so `pnpm deploy` can build a
+     * self-contained Docker image — makes pnpm *copy* a workspace package into
+     * its dependents' `node_modules` instead of symlinking, whenever peer
+     * resolution varies. `@verixa/audit` and `@verixa/stellar-anchor` qualify,
+     * because the Stellar SDK brings `debug`/`supports-color` peers along;
+     * `@verixa/identity` and the rest are symlinked and unaffected.
+     *
+     * Those copies are taken during `pnpm install`, when no package has a
+     * `dist` yet, and nothing refreshes them before this suite runs — so every
+     * spec failed on a clean checkout with "Failed to resolve entry for
+     * package". It never reproduced locally, because a developer's
+     * `node_modules` has been through an install *after* a build at some point.
+     *
+     * Pointing at source is the honest fix for a test runner: these specs
+     * exercise behaviour, not packaging, and the Docker job already proves the
+     * built artifacts resolve for real. The alternative — dropping
+     * `injectWorkspacePackages` — would break the image build to fix the tests.
+     */
+    resolve: {
+      alias: {
+        "@verixa/audit": packageEntry("audit"),
+        "@verixa/stellar-anchor": packageEntry("stellar-anchor"),
+      },
+    },
     test: {
       name: "@verixa/integration-tests",
 
