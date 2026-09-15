@@ -120,4 +120,5 @@ Full issue detail lives in `planning/issues/phase-XX-<slug>.md`.
 - [x] Issue 059 — Performance baseline (implemented; p50/p95/p99 benchmark script. Baseline table deliberately left unrecorded rather than populated from a CI runner — cross-machine numbers are meaningless and a wrong number carries more authority than a missing one.)
 - [x] Issue 060 — Persistence layer walkthrough (implemented; includes the two real bugs the contract suite caught, since those make the case better than the theory does.)
 - [ ] Issues 190B–190D — Stellar **mainnet** readiness: KMS-backed key management, funding/balance monitoring, and a rehearsed cutover runbook. Added because the gap was previously invisible: 190A is testnet-only, and shipping it to mainnet needs operational work that no issue covered.
-- [ ] Issues 061–500 — planned, not yet implemented (except 190A above)
+- [x] Issue 061 — Password hashing service (argon2id) (implemented; `PasswordHasher` port + `Argon2PasswordHasher` at OWASP minimum parameters. `needsRehash` had to be hand-implemented via `parseOptions` — the library has no such function, and an over-broad try/catch initially hid that as "unreadable hash". It reports upgrades only, never downgrades, so lowering a parameter can't silently re-hash every password down to it.)
+- [ ] Issues 062–500 — planned, not yet implemented (except 190A above)
