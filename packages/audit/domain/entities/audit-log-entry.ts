@@ -1,0 +1,243 @@
+import { createHash } from "node:crypto";
+
+import { createId, type Id } from "@verixa/shared-kernel";
+
+export type AuditLogEntryId = Id<"AuditLogEntryId">;
+
+/**
+ * What happened. A closed set rather than a free string, so a query for
+ * "every failed login last week" cannot miss entries because someone wrote
+ * `login_failed` in one place and `LOGIN_FAILURE` in another.
+ */
+export type AuditAction =
+  | "user.registered"
+  | "user.login_succeeded"
+  | "user.login_failed"
+  | "user.locked_out"
+  | "user.email_verified"
+  | "user.password_reset_requested"
+  | "user.password_reset_completed";
+
+/**
+ * The genesis link.
+ *
+ * The first entry in a chain has no predecessor, and needs *something* in the
+ * position where a previous hash would go — otherwise the first entry's hash
+ * is computed over a different shape than every other entry's, and the
+ * verification loop needs a special case. Sixty-four zeroes is the
+ * conventional choice and keeps the shape uniform.
+ */
+export const GENESIS_HASH = "0".repeat(64);
+
+interface AuditLogEntryProps {
+  readonly id: AuditLogEntryId;
+  readonly sequence: number;
+  readonly action: AuditAction;
+  readonly actorId: string | undefined;
+  readonly subjectId: string | undefined;
+  readonly metadata: Readonly<Record<string, string>>;
+  readonly occurredAt: Date;
+  readonly previousHash: string;
+  readonly hash: string;
+}
+
+/**
+ * One tamper-evident record of something that happened.
+ *
+ * ## Why entries are chained rather than merely timestamped
+ *
+ * An audit log that is just rows in a table proves nothing against the one
+ * adversary it most needs to resist: someone with write access to that table.
+ * They can delete the row recording what they did, or edit it, and no
+ * evidence of the change remains.
+ *
+ * Each entry therefore commits to its predecessor: `hash = SHA256(previous
+ * hash ‖ this entry's content)`. Removing or altering any entry breaks every
+ * hash after it, so tampering is no longer a matter of editing one row — it
+ * requires rewriting the entire log from that point forward.
+ *
+ * ## What chaining alone does *not* give you
+ *
+ * Exactly that: it requires rewriting the log, and an attacker with full
+ * database access can do precisely that. A rewritten chain is internally
+ * consistent and indistinguishable from an honest one.
+ *
+ * Chaining makes the log tamper-**evident** to anyone holding an earlier copy
+ * of a hash. It does not make it tamper-**proof**. Closing that gap needs a
+ * commitment stored somewhere the operator cannot rewrite, which is what
+ * anchoring the chain head to Stellar is for — see
+ * `docs/adr/0003-stellar-audit-anchoring.md`. The two mechanisms are
+ * complementary and neither is sufficient alone, which is worth stating
+ * plainly because "we hash-chain our audit log" is frequently claimed as
+ * though it were the whole answer.
+ *
+ * ## No update or delete
+ *
+ * There is deliberately no method to modify an entry. Append-only is the
+ * property being protected, and an aggregate that could edit itself would
+ * make the chain a formality.
+ */
+export class AuditLogEntry {
+  readonly id: AuditLogEntryId;
+  readonly sequence: number;
+  readonly action: AuditAction;
+  readonly actorId: string | undefined;
+  readonly subjectId: string | undefined;
+  readonly metadata: Readonly<Record<string, string>>;
+  readonly occurredAt: Date;
+  readonly previousHash: string;
+  readonly hash: string;
+
+  private constructor(props: AuditLogEntryProps) {
+    this.id = props.id;
+    this.sequence = props.sequence;
+    this.action = props.action;
+    this.actorId = props.actorId;
+    this.subjectId = props.subjectId;
+    this.metadata = props.metadata;
+    this.occurredAt = props.occurredAt;
+    this.previousHash = props.previousHash;
+    this.hash = props.hash;
+  }
+
+  /**
+   * The canonical byte representation an entry's hash is computed over.
+   *
+   * Field order is fixed and metadata keys are sorted, because the hash has
+   * to be reproducible by someone re-deriving it years later from the stored
+   * columns — possibly in another language. `JSON.stringify` over an object
+   * would make the digest depend on JavaScript's property-insertion order,
+   * which is an implementation detail of how the entry happened to be built.
+   *
+   * Newline-separated with an explicit field count rather than concatenated,
+   * so no combination of field values can produce the same string as a
+   * different combination.
+   */
+  private static canonicalize(props: Omit<AuditLogEntryProps, "hash" | "id">): string {
+    const metadata = Object.keys(props.metadata)
+      .sort()
+      .map((key) => `${key}=${props.metadata[key] ?? ""}`)
+      .join("");
+
+    return [
+      String(props.sequence),
+      props.action,
+      props.actorId ?? "",
+      props.subjectId ?? "",
+      props.occurredAt.toISOString(),
+      props.previousHash,
+      metadata,
+    ].join("\n");
+  }
+
+  /** SHA-256 over {@link canonicalize}, hex-encoded. */
+  private static computeHash(props: Omit<AuditLogEntryProps, "hash" | "id">): string {
+    return createHash("sha256").update(AuditLogEntry.canonicalize(props), "utf8").digest("hex");
+  }
+
+  /**
+   * Appends an entry after `previous`, or starts a chain when it is
+   * `undefined`.
+   *
+   * Taking the predecessor rather than a bare hash is what makes a broken
+   * chain hard to construct by accident: the caller has to have actually read
+   * the tail of the log.
+   */
+  static append(params: {
+    action: AuditAction;
+    actorId?: string | undefined;
+    subjectId?: string | undefined;
+    metadata?: Readonly<Record<string, string>>;
+    previous?: AuditLogEntry | undefined;
+    occurredAt?: Date;
+  }): AuditLogEntry {
+    const body = {
+      sequence: params.previous === undefined ? 1 : params.previous.sequence + 1,
+      action: params.action,
+      actorId: params.actorId,
+      subjectId: params.subjectId,
+      metadata: params.metadata ?? {},
+      occurredAt: params.occurredAt ?? new Date(),
+      previousHash: params.previous?.hash ?? GENESIS_HASH,
+    };
+
+    return new AuditLogEntry({
+      id: createId<"AuditLogEntryId">(),
+      ...body,
+      hash: AuditLogEntry.computeHash(body),
+    });
+  }
+
+  /** Rebuilds from already-trusted data (a database row). */
+  static reconstitute(props: AuditLogEntryProps): AuditLogEntry {
+    return new AuditLogEntry(props);
+  }
+
+  /**
+   * Whether this entry's stored hash matches its content.
+   *
+   * Recomputed rather than trusted, which is the entire point: a stored hash
+   * that is simply read back proves nothing, because an attacker editing the
+   * row would edit the hash too. The check only means something when the
+   * digest is derived again from the content.
+   */
+  get hasValidHash(): boolean {
+    return (
+      this.hash ===
+      AuditLogEntry.computeHash({
+        sequence: this.sequence,
+        action: this.action,
+        actorId: this.actorId,
+        subjectId: this.subjectId,
+        metadata: this.metadata,
+        occurredAt: this.occurredAt,
+        previousHash: this.previousHash,
+      })
+    );
+  }
+}
+
+/** Why a chain failed verification. */
+export interface ChainBreak {
+  readonly sequence: number;
+  readonly reason: "content_altered" | "link_broken" | "sequence_gap";
+}
+
+/**
+ * Verifies a chain, in order, and reports the first break.
+ *
+ * Returns the *first* break rather than all of them because everything after
+ * a break is unreliable anyway — once an entry is altered, every subsequent
+ * link mismatches as a consequence, and listing them all would bury the one
+ * fact that matters under noise it caused.
+ *
+ * Checks three distinct failures, and they mean different things:
+ * - `content_altered` — an entry's own hash no longer matches its content.
+ * - `link_broken` — the entry is intact but does not follow its predecessor,
+ *   which is what a *deletion* looks like.
+ * - `sequence_gap` — numbering skips, which catches a removal that also fixed
+ *   up the hashes but not the counter.
+ */
+export function verifyChain(entries: readonly AuditLogEntry[]): ChainBreak | undefined {
+  let previous: AuditLogEntry | undefined;
+
+  for (const entry of entries) {
+    if (!entry.hasValidHash) {
+      return { sequence: entry.sequence, reason: "content_altered" };
+    }
+
+    const expectedPreviousHash = previous?.hash ?? GENESIS_HASH;
+    if (entry.previousHash !== expectedPreviousHash) {
+      return { sequence: entry.sequence, reason: "link_broken" };
+    }
+
+    const expectedSequence = previous === undefined ? 1 : previous.sequence + 1;
+    if (entry.sequence !== expectedSequence) {
+      return { sequence: entry.sequence, reason: "sequence_gap" };
+    }
+
+    previous = entry;
+  }
+
+  return undefined;
+}

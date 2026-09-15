@@ -1,3 +1,11 @@
+import { randomUUID } from "node:crypto";
+
+import {
+  AnchorAuditLog,
+  PrismaAnchorRecordRepository,
+  PrismaAuditLogRepository,
+  RecordAuditEvent,
+} from "@verixa/audit";
 import { loadConfig } from "@verixa/config";
 import {
   Argon2PasswordHasher,
@@ -23,6 +31,7 @@ import {
   SuspendUser,
   UpdateUserProfile,
 } from "@verixa/identity";
+import { StellarHashAnchor } from "@verixa/stellar-anchor";
 
 /**
  * The composition root: the one place in the system allowed to know which
@@ -92,10 +101,25 @@ export interface CredentialUseCases {
   readonly confirmPasswordReset: ConfirmPasswordReset;
 }
 
+/** Audit recording and its external anchoring. */
+export interface AuditUseCases {
+  readonly recordEvent: RecordAuditEvent;
+  /**
+   * Present only when an anchoring ledger is configured.
+   *
+   * Absent rather than a no-op, so a deployment that has not set up anchoring
+   * cannot believe it has. A silent stub here would be the worst outcome
+   * available: an operator who thinks their audit log is externally verifiable
+   * when nothing has ever been committed anywhere.
+   */
+  readonly anchor: AnchorAuditLog | undefined;
+}
+
 export interface Container {
   readonly prisma: PrismaClient;
   readonly identity: IdentityUseCases;
   readonly credentials: CredentialUseCases;
+  readonly audit: AuditUseCases;
   /** Releases the database connection. Call on shutdown. */
   readonly dispose: () => Promise<void>;
 }
@@ -137,6 +161,21 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
   const credentialNotifier = new NullCredentialNotifier();
   const sessionRevoker = new NoSessionsRevoker();
 
+  // Audit recording. Failures are logged and never propagated -- see
+  // RecordAuditEvent on why a failed audit write must not fail the operation
+  // it was recording.
+  const auditLog = new PrismaAuditLogRepository(prisma.auditLogEntry);
+  const anchorRecords = new PrismaAnchorRecordRepository(prisma.anchorRecord, () => randomUUID());
+
+  // Anchoring is wired only when a signing key is configured. See AuditUseCases
+  // on why this is `undefined` rather than a no-op.
+  const anchorSecretKey = process.env["STELLAR_ANCHOR_SECRET_KEY"];
+  const stellarNetwork = process.env["STELLAR_NETWORK"] === "public" ? "public" : "testnet";
+  const hashAnchor =
+    anchorSecretKey === undefined || anchorSecretKey === ""
+      ? undefined
+      : new StellarHashAnchor({ secretKey: anchorSecretKey, network: stellarNetwork });
+
   // PrismaOrganizationRepository and PrismaOrganizationMembershipRepository
   // aren't constructed here: the only use case that touches them
   // (CreateOrganization) reaches them through the unit of work, since its two
@@ -174,6 +213,21 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
         passwordHasher,
         sessionRevoker,
       ),
+    },
+    audit: {
+      recordEvent: new RecordAuditEvent(auditLog, (error: unknown) => {
+        // Written to stderr rather than swallowed entirely: a gap in the audit
+        // log is itself a security-relevant event, and the sequence gap it
+        // leaves is deliberately visible to `verifyChain`.
+        process.stderr.write(
+          `audit write failed: ${error instanceof Error ? error.message : String(error)}
+`,
+        );
+      }),
+      anchor:
+        hashAnchor === undefined
+          ? undefined
+          : new AnchorAuditLog(auditLog, anchorRecords, hashAnchor),
     },
     dispose: async () => {
       await prisma.$disconnect();

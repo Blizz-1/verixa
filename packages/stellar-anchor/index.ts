@@ -19,7 +19,17 @@ export type {
 // for deployments that want no ledger dependency at all.
 export { InMemoryHashAnchor } from "./infrastructure/testing/in-memory-hash-anchor.js";
 
-// The shared behavioral contract, exported so any future HashAnchor
-// implementation can prove it behaves identically rather than merely
-// compiling against the same interface.
-export { hashAnchorContract } from "./infrastructure/testing/contracts/hash-anchor.contract.js";
+// `hashAnchorContract` is deliberately NOT exported here.
+//
+// It imports `vitest`, and this file is a *runtime* entry point. Exporting it
+// meant that merely importing `@verixa/stellar-anchor` in a production process
+// loaded vitest, which then threw "Vitest failed to access its internal state"
+// and killed the process at startup — a failure no test could catch, because
+// under vitest the import succeeds.
+//
+// The intent behind exporting it was sound: any future HashAnchor
+// implementation should be able to prove it behaves identically rather than
+// merely compiling against the same interface. Both existing consumers reach
+// it by relative path, which is enough for now. Giving it a `./testing`
+// subpath export is the right answer if an out-of-repo implementation ever
+// needs it, and that is a packaging change rather than a line in this file.

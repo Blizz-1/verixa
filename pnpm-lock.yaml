@@ -53,6 +53,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@verixa/audit':
+        specifier: workspace:*
+        version: file:packages/audit(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(supports-color@7.2.0)(typescript@5.9.3)
       '@verixa/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -68,6 +71,9 @@ importers:
       '@verixa/shared-kernel':
         specifier: workspace:*
         version: link:../../packages/shared-kernel
+      '@verixa/stellar-anchor':
+        specifier: workspace:*
+        version: file:packages/stellar-anchor(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       fastify:
         specifier: ^5.12.1
         version: 5.12.4
@@ -87,6 +93,37 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.23.1
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)(supports-color@7.2.0)
+
+  packages/audit:
+    dependencies:
+      '@verixa/database':
+        specifier: workspace:*
+        version: link:../database
+      '@verixa/shared-kernel':
+        specifier: workspace:*
+        version: link:../shared-kernel
+      '@verixa/stellar-anchor':
+        specifier: workspace:*
+        version: link:../stellar-anchor
+    devDependencies:
+      '@stellar/stellar-sdk':
+        specifier: ^16.2.0
+        version: 16.2.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      '@vitest/coverage-v8':
+        specifier: ^2.1.9
+        version: 2.1.9(supports-color@7.2.0)(vitest@2.1.9(@types/node@22.20.1)(supports-color@7.2.0))
+      tsx:
+        specifier: ^4.23.1
+        version: 4.23.13
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -1360,6 +1397,18 @@ packages:
     resolution: {integrity: sha512-nAB74NfSNKknqQ1RrYj6uz8FcXEomu/MATJZxh/x+BArzN2U3JbOYC0APYzUIGhVY3m5hRxA8VPNdPBoG8txlA==}
     cpu: [x64]
     os: [win32]
+
+  '@verixa/audit@file:packages/audit':
+    resolution: {directory: packages/audit, type: directory}
+
+  '@verixa/database@file:packages/database':
+    resolution: {directory: packages/database, type: directory}
+
+  '@verixa/shared-kernel@file:packages/shared-kernel':
+    resolution: {directory: packages/shared-kernel, type: directory}
+
+  '@verixa/stellar-anchor@file:packages/stellar-anchor':
+    resolution: {directory: packages/stellar-anchor, type: directory}
 
   '@vitest/coverage-v8@2.1.9':
     resolution: {integrity: sha512-Z2cOr0ksM00MpEfyVE8KXIYPEcBFxdbLSs56L8PO0QQMxt/6bDj45uQfxoc96v05KW3clk7vvgP0qfDit9DmfQ==}
@@ -3952,6 +4001,36 @@ snapshots:
 
   '@unrs/resolver-binding-win32-x64-msvc@1.12.2':
     optional: true
+
+  '@verixa/audit@file:packages/audit(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(supports-color@7.2.0)(typescript@5.9.3)':
+    dependencies:
+      '@verixa/database': file:packages/database(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)
+      '@verixa/shared-kernel': file:packages/shared-kernel
+      '@verixa/stellar-anchor': file:packages/stellar-anchor(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+    transitivePeerDependencies:
+      - debug
+      - prisma
+      - supports-color
+      - typescript
+
+  '@verixa/database@file:packages/database(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)':
+    dependencies:
+      '@prisma/client': 6.19.3(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)
+    transitivePeerDependencies:
+      - prisma
+      - typescript
+
+  '@verixa/shared-kernel@file:packages/shared-kernel':
+    dependencies:
+      pino: 9.14.0
+
+  '@verixa/stellar-anchor@file:packages/stellar-anchor(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)':
+    dependencies:
+      '@stellar/stellar-sdk': 16.2.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+      '@verixa/shared-kernel': file:packages/shared-kernel
+    transitivePeerDependencies:
+      - debug
+      - supports-color
 
   '@vitest/coverage-v8@2.1.9(supports-color@7.2.0)(vitest@2.1.9(@types/node@22.20.1)(supports-color@7.2.0))':
     dependencies:

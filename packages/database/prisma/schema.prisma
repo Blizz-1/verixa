@@ -365,3 +365,72 @@ model PasswordResetToken {
   @@index([expiresAt])
   @@map("password_reset_tokens")
 }
+
+/// Append-only, hash-chained record of security-relevant events (Phase 10).
+///
+/// Each row commits to its predecessor, so altering or removing one breaks
+/// every hash after it. That makes the log tamper-*evident* -- not
+/// tamper-proof, since an attacker with write access could rewrite the whole
+/// chain consistently. Closing that gap is what anchoring the head to Stellar
+/// is for; see AnchorRecord below and docs/adr/0003-stellar-audit-anchoring.md.
+model AuditLogEntry {
+  id String @id @db.Uuid
+
+  /// Position in the chain, from 1. **Unique**, not merely indexed: two
+  /// concurrent appends built from the same predecessor would both claim the
+  /// same sequence, and this constraint is what turns that race into a failed
+  /// insert rather than a silently forked chain.
+  sequence Int @unique
+
+  action String
+
+  /// Who did it, and to whom. Plain strings, not foreign keys -- an audit row
+  /// must survive the deletion of the user it refers to, and an FK with
+  /// CASCADE would erase exactly the evidence that matters most.
+  actorId   String? @map("actor_id") @db.Uuid
+  subjectId String? @map("subject_id") @db.Uuid
+
+  /// Contextual detail, hashed along with everything else. Flat string map so
+  /// the canonical form is unambiguous across languages.
+  metadata Json
+
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(3)
+
+  /// The predecessor's hash. Sixty-four zeroes for the first entry.
+  previousHash String @map("previous_hash")
+
+  /// SHA-256 over this entry's canonical form, including previousHash.
+  hash String @unique
+
+  @@index([occurredAt])
+  @@index([actorId])
+  @@map("audit_log_entries")
+}
+
+/// A commitment of the audit log's head hash to an external ledger.
+///
+/// Keeping these as rows rather than a single mutable "latest anchor" gives
+/// the operator a history: each record proves the log's state at one moment,
+/// and an auditor can check any of them independently against the ledger.
+model AnchorRecord {
+  id String @id @db.Uuid
+
+  /// Chain position this anchor covers. Everything at or below it is
+  /// committed to, because the chain links them.
+  sequence  Int
+  chainHash String @map("chain_hash")
+
+  /// The Stellar transaction hash. Opaque here on purpose -- this table knows
+  /// it is a handle, not what ledger it belongs to.
+  anchorRef String @unique @map("anchor_ref")
+
+  /// e.g. "stellar:testnet". Recorded because a testnet anchor is not a
+  /// mainnet one, and a row that did not say which would be misleading
+  /// evidence.
+  network String
+
+  anchoredAt DateTime @map("anchored_at") @db.Timestamptz(3)
+
+  @@index([sequence])
+  @@map("anchor_records")
+}
