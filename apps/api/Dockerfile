@@ -40,28 +40,31 @@ RUN pnpm --filter @verixa/api... run build
 # directory. This is what actually ships; nothing else from /repo does.
 RUN pnpm --filter=@verixa/api deploy /out --prod
 
-# Generate again, into the bundle.
+# Carry the generated client into the bundle.
 #
 # `deploy --prod` builds /out a fresh node_modules from the store rather than
 # copying /repo's, so the client generated above — which lives *inside*
-# node_modules, at the default output location — does not come with it. The
-# bundle ships an @prisma/client that has never been generated, and the first
-# `new PrismaClient()` throws "@prisma/client did not initialize yet".
+# node_modules, at Prisma's default output location — does not come with it.
+# The bundle ships an @prisma/client that has never been generated, and the
+# first `new PrismaClient()` throws "@prisma/client did not initialize yet".
 #
 # Nothing before this point can notice: the image builds, and the package
-# imports fine. Only constructing the client fails, which happens once the
-# process is already starting.
-# Run from inside the deployed package, not from /repo with a --schema
-# pointing out of it. Prisma infers its project root from the working
-# directory, so the latter inferred `/`, found no package.json, and tried
-# to `npm i @prisma/client` to recover — which fails, and would have been
-# the wrong fix anyway. Entering the directory lets it resolve the client
-# that pnpm already linked there and generate in place, offline.
+# imports fine. Only constructing the client fails, once the process is
+# already starting.
 #
-# PATH supplies the CLI: prisma is a devDependency, so it exists in /repo
-# but deliberately not in the --prod bundle.
-RUN cd /out/node_modules/@verixa/database \
-      && PATH="/repo/packages/database/node_modules/.bin:$PATH" prisma generate
+# Copying the output beats running `prisma generate` a second time, which was
+# tried first and does not work here. Prisma infers its project root from the
+# working directory and resolves @prisma/client from there; neither /repo nor
+# the deployed package gives it both, so it falls back to installing
+# @prisma/client from the network to recover — in a build stage, offline.
+# The artefact already exists and is correct. Moving it is the whole job.
+RUN set -eu; \
+    src="$(find /repo/node_modules/.pnpm -maxdepth 5 -type d -path '*@prisma+client*/node_modules/.prisma' -print -quit)"; \
+    dest="$(find /out/node_modules/.pnpm -maxdepth 4 -type d -path '*@prisma+client*/node_modules' -print -quit)"; \
+    test -n "$src"; \
+    test -n "$dest"; \
+    rm -rf "$dest/.prisma"; \
+    cp -R "$src" "$dest/"
 
 # Prove the bundle actually loads before shipping it.
 #

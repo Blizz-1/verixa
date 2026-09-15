@@ -136,23 +136,38 @@ describe("Argon2PasswordHasher", () => {
   });
 
   describe("cost at production parameters", () => {
-    it("is slow enough to make offline guessing expensive", async () => {
+    it("hashes at the configured cost, not a weaker one", async () => {
       const production = new Argon2PasswordHasher(DEFAULT_ARGON2_PARAMETERS);
 
       const started = performance.now();
-      await production.hash("correct horse battery staple");
+      const digest = await production.hash("correct horse battery staple");
       const elapsed = performance.now() - started;
 
-      // Slowness *is* the security property, so it deserves an assertion.
-      // A configuration change that accidentally made hashing instant would
-      // break nothing visible and weaken everything — this is the only test
-      // that would notice.
+      // Slowness *is* the security property, so it deserves an assertion: a
+      // configuration change that accidentally made hashing cheap would break
+      // nothing visible and weaken everything, and this is the only test that
+      // would notice.
       //
-      // The bound is deliberately loose (10ms against a design target of
-      // ~50-100ms): CI runners are shared and timing-sensitive assertions are
-      // the classic source of flaky suites. It is calibrated to catch
-      // "the KDF is not running at all", not to measure performance.
-      expect(elapsed).toBeGreaterThan(10);
+      // Asserted against the PHC string rather than the clock. Argon2 records
+      // the cost it was produced with directly in its output, so this reads
+      // the parameters actually used instead of inferring them from how long
+      // the machine took — which is the same claim, made deterministically.
+      //
+      // The previous version asserted `elapsed > 10`, calibrated as a loose
+      // bound against a ~50-100ms design target. A CI runner did it in 9.04ms
+      // and the suite went red over a machine being fast. That is the failure
+      // mode every wall-clock assertion eventually has, and the reason the
+      // real check should not be one.
+      const { memoryCost, timeCost, parallelism } = DEFAULT_ARGON2_PARAMETERS;
+      expect(digest).toContain(
+        `$argon2id$v=19$m=${String(memoryCost)},t=${String(timeCost)},p=${String(parallelism)}$`,
+      );
+
+      // Kept only as a floor on "the KDF ran at all". Argon2id over 19 MiB
+      // cannot finish in under a millisecond on any hardware, while a no-op
+      // or a bare digest returns in microseconds. Loose enough that runner
+      // speed cannot reach it.
+      expect(elapsed).toBeGreaterThan(1);
     }, 30_000);
   });
 });
