@@ -165,6 +165,173 @@ jobs:
       - name: Run repository contract tests against a Testcontainers Postgres
         run: pnpm --filter @verixa/identity run test
 
+  # Verifies the *compose* stack's database roles, which nothing else covers.
+  #
+  # The `ci` job above talks to a bare service container and the `docker` job
+  # below builds the production image; neither runs docker-compose.yml, so
+  # until this existed the init scripts in infra/postgres/ were unexecuted
+  # code. That matters more than it sounds: they are what stops the API
+  # connecting as a superuser, and a superuser bypasses row level security
+  # entirely — so a mistake here disables every tenant-isolation policy
+  # silently, with no test failing anywhere.
+  #
+  # Deliberately does not boot the `api` service. That would mean a full
+  # install-and-build inside the container for a slow, flaky approximation of
+  # what the `docker` job already proves. What is unproven is narrower: does
+  # the role get created, is it actually unprivileged, and does it have
+  # exactly the grants the application needs.
+  compose-database-roles:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://verixa:verixa@localhost:5432/verixa
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Start Postgres from docker-compose.yml
+        run: docker compose up -d --wait postgres
+
+      - name: Confirm compose points the API at the unprivileged role
+        run: |
+          set -eu
+          url="$(docker compose config --format json             | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['api']['environment']['DATABASE_URL'])")"
+          echo "api DATABASE_URL: $url"
+          case "$url" in
+            postgres://verixa_app:*) ;;
+            *)
+              echo "::error::the api service must connect as verixa_app, not as the superuser"
+              exit 1
+              ;;
+          esac
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build
+        run: pnpm build
+
+      # Only the identity package: it owns the Prisma repository contract
+      # suite, which is what actually needs a database here.
+      - name: Run repository contract tests against a Testcontainers Postgres
+        run: pnpm --filter @verixa/identity run test
+
+  # Verifies the *compose* stack's database roles, which nothing else covers.
+  #
+  # The `ci` job above talks to a bare service container and the `docker` job
+  # below builds the production image; neither runs docker-compose.yml, so
+  # until this existed the init scripts in infra/postgres/ were unexecuted
+  # code. That matters more than it sounds: they are what stops the API
+  # connecting as a superuser, and a superuser bypasses row level security
+  # entirely — so a mistake here disables every tenant-isolation policy
+  # silently, with no test failing anywhere.
+  #
+  # Deliberately does not boot the `api` service. That would mean a full
+  # install-and-build inside the container for a slow, flaky approximation of
+  # what the `docker` job already proves. What is unproven is narrower: does
+  # the role get created, is it actually unprivileged, and does it have
+  # exactly the grants the application needs.
+  compose-database-roles:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://verixa:verixa@localhost:5432/verixa
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Start Postgres from docker-compose.yml
+        run: docker compose up -d --wait postgres
+
+      - name: Confirm compose points the API at the unprivileged role
+        run: |
+          url="$(docker compose config --format json             | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>console.log(JSON.parse(s).services.api.environment.DATABASE_URL))")"
+          echo "api DATABASE_URL: $url"
+          case "$url" in
+            postgres://verixa_app:*) ;;
+            *)
+              echo "::error::the api service must connect as verixa_app, not as the superuser"
+              exit 1
+              ;;
+          esac
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @verixa/database run db:generate
+
+      # As the owner, which is the split being tested: DDL needs `verixa`,
+      # the application gets `verixa_app`. This also exercises the
+      # ALTER DEFAULT PRIVILEGES lines, since every table in the schema is
+      # created here, after the grants were issued.
+      - name: Apply migrations as the owner
+        run: pnpm --filter @verixa/database run db:migrate:deploy
+
+      - name: The app role exists and is unprivileged
+        run: |
+          set -eu
+          attrs="$(docker compose exec -T postgres psql -U verixa -d verixa -tAX -c             "SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = 'verixa_app'")"
+          echo "verixa_app attributes (super|bypassrls|createdb|createrole): $attrs"
+          if [ -z "$attrs" ]; then
+            echo "::error::verixa_app was not created — did the init script run?"
+            exit 1
+          fi
+          if [ "$attrs" != "f|f|f|f" ]; then
+            echo "::error::verixa_app must be NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE"
+            exit 1
+          fi
+
+      - name: The app role can read and write application tables
+        run: |
+          set -eu
+          docker compose exec -T postgres psql -U verixa_app -d verixa -v ON_ERROR_STOP=1 -c             "INSERT INTO users (id, email, display_name, status, created_at, updated_at)
+             VALUES (gen_random_uuid(), 'role-check@example.com', 'Role Check', 'active', now(), now());"
+          docker compose exec -T postgres psql -U verixa_app -d verixa -v ON_ERROR_STOP=1 -c             "SELECT count(*) FROM users;"
+
+      # The point of the whole exercise. `organizations` has RLS enabled and
+      # forced, so without `app.current_organization_id` set this insert must
+      # be refused. A superuser connection would sail straight through it,
+      # which is exactly the regression being guarded against.
+      - name: The app role is subject to row level security
+        run: |
+          set -eu
+          if docker compose exec -T postgres psql -U verixa_app -d verixa -v ON_ERROR_STOP=1 -c             "INSERT INTO organizations (id, name, slug, owner_id, status, created_at, updated_at)
+             SELECT gen_random_uuid(), 'Bypass Check', 'bypass-check', id, 'active', now(), now()
+             FROM users LIMIT 1;"
+          then
+            echo "::error::verixa_app bypassed row level security — tenant isolation is not enforced"
+            exit 1
+          fi
+          echo "insert refused by row level security, as required"
+
+      - name: The app role cannot issue DDL
+        run: |
+          set -eu
+          if docker compose exec -T postgres psql -U verixa_app -d verixa -v ON_ERROR_STOP=1 -c             "CREATE TABLE should_not_exist (id uuid PRIMARY KEY);"
+          then
+            echo "::error::verixa_app must not be able to create tables"
+            exit 1
+          fi
+          echo "DDL refused, as required"
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v || true
+
   docker:
     runs-on: ubuntu-latest
     steps:
