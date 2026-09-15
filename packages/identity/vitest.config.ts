@@ -26,6 +26,14 @@ export default mergeConfig(
           // itself, which CI requires via REQUIRE_DATABASE_TESTS=1.
           "**/infrastructure/persistence/**",
           "**/infrastructure/testing/database-harness.ts",
+          // A benchmark, not library code. It needs a live Postgres, is run
+          // by hand when a performance question comes up, and is never
+          // imported by anything that ships. Counted, its 180 lines pulled
+          // the package from ~96% to 87.5% and failed the gate — which would
+          // have read as a coverage regression in the domain layer when
+          // nothing in the domain layer had changed. The gate is here to say
+          // something about code consumers depend on.
+          "**/scripts/**",
         ],
         thresholds: {
           statements: 90,

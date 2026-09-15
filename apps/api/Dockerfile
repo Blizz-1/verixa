@@ -51,8 +51,17 @@ RUN pnpm --filter=@verixa/api deploy /out --prod
 # Nothing before this point can notice: the image builds, and the package
 # imports fine. Only constructing the client fails, which happens once the
 # process is already starting.
-RUN pnpm --filter @verixa/database exec prisma generate \
-      --schema /out/node_modules/@verixa/database/prisma/schema.prisma
+# Run from inside the deployed package, not from /repo with a --schema
+# pointing out of it. Prisma infers its project root from the working
+# directory, so the latter inferred `/`, found no package.json, and tried
+# to `npm i @prisma/client` to recover — which fails, and would have been
+# the wrong fix anyway. Entering the directory lets it resolve the client
+# that pnpm already linked there and generate in place, offline.
+#
+# PATH supplies the CLI: prisma is a devDependency, so it exists in /repo
+# but deliberately not in the --prod bundle.
+RUN cd /out/node_modules/@verixa/database \
+      && PATH="/repo/packages/database/node_modules/.bin:$PATH" prisma generate
 
 # Prove the bundle actually loads before shipping it.
 #
