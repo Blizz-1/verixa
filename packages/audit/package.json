@@ -15,15 +15,15 @@
     "demo": "tsx scripts/anchor-demo.ts"
   },
   "dependencies": {
-    "@verixa/shared-kernel": "workspace:*",
-    "@verixa/stellar-anchor": "workspace:*"
+    "@verixa/shared-kernel": "workspace:*"
   },
   "devDependencies": {
+    "@stellar/stellar-sdk": "^16.2.0",
     "@types/node": "^22.10.0",
+    "@verixa/stellar-anchor": "workspace:*",
     "@vitest/coverage-v8": "^2.1.9",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8",
     "tsx": "^4.23.1",
-    "@stellar/stellar-sdk": "^16.2.0"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

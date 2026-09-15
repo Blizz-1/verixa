@@ -44,3 +44,38 @@ export interface AnchorRecordRepository {
   findLatest(): Promise<AnchorRecord | undefined>;
   findAll(limit: number): Promise<readonly AnchorRecord[]>;
 }
+
+/**
+ * The anchoring capability this package needs, declared locally.
+ *
+ * Structurally identical to `HashAnchor` in `@verixa/stellar-anchor`, and
+ * deliberately not imported from it. The audit log's requirement is "something
+ * can commit a hash somewhere append-only"; naming a specific ledger package
+ * in its dependency graph would invert that — the whole reason `HashAnchor`
+ * exists is so nothing above the adapter mentions Stellar.
+ *
+ * The composition root supplies the concrete implementation, exactly as it
+ * does for every repository here. Any `HashAnchor` satisfies this by shape, so
+ * the two stay compatible without a dependency edge.
+ */
+export interface HashAnchorPort {
+  anchor(
+    hash: string,
+  ): Promise<
+    | { readonly kind: "ok"; readonly value: AnchorReceiptLike }
+    | { readonly kind: "err"; readonly error: AnchorFailure }
+  >;
+}
+
+/** The minimum an anchoring failure must carry. */
+export interface AnchorFailure {
+  readonly message: string;
+}
+
+/** The receipt shape {@link HashAnchorPort.anchor} resolves with. */
+export interface AnchorReceiptLike {
+  readonly hash: string;
+  readonly anchorRef: string;
+  readonly anchoredAt: Date;
+  readonly network: string;
+}

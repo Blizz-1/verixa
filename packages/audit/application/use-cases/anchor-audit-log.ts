@@ -1,10 +1,11 @@
 import { Result, ValidationError } from "@verixa/shared-kernel";
-import type { AnchorError, HashAnchor } from "@verixa/stellar-anchor";
 
 import type {
+  AnchorFailure,
   AnchorRecord,
   AnchorRecordRepository,
   AuditLogRepository,
+  HashAnchorPort,
 } from "../ports/audit-log-repository.js";
 
 export interface AnchorAuditLogResult {
@@ -13,7 +14,7 @@ export interface AnchorAuditLogResult {
   readonly newlyCovered: number;
 }
 
-export type AnchorAuditLogError = ValidationError | AnchorError;
+export type AnchorAuditLogError = ValidationError | AnchorFailure;
 
 /**
  * Commits the audit log's current head hash to an external ledger.
@@ -57,7 +58,7 @@ export class AnchorAuditLog {
   constructor(
     private readonly auditLog: AuditLogRepository,
     private readonly anchors: AnchorRecordRepository,
-    private readonly hashAnchor: HashAnchor,
+    private readonly hashAnchor: HashAnchorPort,
   ) {}
 
   async execute(): Promise<Result<AnchorAuditLogResult, AnchorAuditLogError>> {

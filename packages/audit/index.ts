@@ -13,9 +13,12 @@ export {
 
 // Application: ports
 export type {
+  AnchorFailure,
+  AnchorReceiptLike,
   AnchorRecord,
   AnchorRecordRepository,
   AuditLogRepository,
+  HashAnchorPort,
 } from "./application/ports/audit-log-repository.js";
 
 // Application: use cases

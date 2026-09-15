@@ -55,7 +55,7 @@ importers:
     dependencies:
       '@verixa/audit':
         specifier: workspace:*
-        version: file:packages/audit(supports-color@7.2.0)
+        version: link:../../packages/audit
       '@verixa/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -105,9 +105,6 @@ importers:
       '@verixa/shared-kernel':
         specifier: workspace:*
         version: link:../shared-kernel
-      '@verixa/stellar-anchor':
-        specifier: workspace:*
-        version: link:../stellar-anchor
     devDependencies:
       '@stellar/stellar-sdk':
         specifier: ^16.2.0
@@ -115,6 +112,9 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1
+      '@verixa/stellar-anchor':
+        specifier: workspace:*
+        version: link:../stellar-anchor
       '@vitest/coverage-v8':
         specifier: ^2.1.9
         version: 2.1.9(supports-color@7.2.0)(vitest@2.1.9(@types/node@22.20.1)(supports-color@7.2.0))
@@ -282,7 +282,7 @@ importers:
         version: link:../apps/api
       '@verixa/audit':
         specifier: workspace:*
-        version: file:packages/audit(supports-color@7.2.0)
+        version: link:../packages/audit
       '@verixa/credentials':
         specifier: workspace:*
         version: link:../packages/credentials
@@ -1397,9 +1397,6 @@ packages:
     resolution: {integrity: sha512-nAB74NfSNKknqQ1RrYj6uz8FcXEomu/MATJZxh/x+BArzN2U3JbOYC0APYzUIGhVY3m5hRxA8VPNdPBoG8txlA==}
     cpu: [x64]
     os: [win32]
-
-  '@verixa/audit@file:packages/audit':
-    resolution: {directory: packages/audit, type: directory}
 
   '@verixa/shared-kernel@file:packages/shared-kernel':
     resolution: {directory: packages/shared-kernel, type: directory}
@@ -3998,14 +3995,6 @@ snapshots:
 
   '@unrs/resolver-binding-win32-x64-msvc@1.12.2':
     optional: true
-
-  '@verixa/audit@file:packages/audit(supports-color@7.2.0)':
-    dependencies:
-      '@verixa/shared-kernel': file:packages/shared-kernel
-      '@verixa/stellar-anchor': file:packages/stellar-anchor(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
-    transitivePeerDependencies:
-      - debug
-      - supports-color
 
   '@verixa/shared-kernel@file:packages/shared-kernel':
     dependencies:
