@@ -1,4 +1,5 @@
 import { buildApp } from "@verixa/api/app";
+import type { Container } from "@verixa/api/composition-root";
 import supertest from "supertest";
 
 /**
@@ -19,8 +20,8 @@ export interface HttpTestClient {
   close: () => Promise<void>;
 }
 
-export async function createHttpTestClient(): Promise<HttpTestClient> {
-  const app = buildApp();
+export async function createHttpTestClient(container?: Container): Promise<HttpTestClient> {
+  const app = buildApp(container === undefined ? {} : { container });
   await app.ready();
 
   return {

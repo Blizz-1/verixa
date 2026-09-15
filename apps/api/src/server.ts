@@ -2,6 +2,7 @@ import { ConfigError, loadConfig } from "@verixa/config";
 import { createLogger } from "@verixa/shared-kernel";
 
 import { buildApp } from "./app.js";
+import { buildContainer } from "./composition-root.js";
 
 let config;
 try {
@@ -18,7 +19,37 @@ try {
 }
 
 const logger = createLogger({ name: "verixa-api", level: config.LOG_LEVEL });
-const app = buildApp(logger);
+
+// The composition root, finally constructed at runtime rather than only in
+// tests. Until this line existed, every repository, use case and mapper in
+// the workspace was unreachable from a running server.
+const container = buildContainer();
+const app = buildApp({ logger, container });
+
+// Close the database connection on shutdown rather than letting the process
+// exit with connections still checked out. Postgres reclaims them eventually,
+// but "eventually" during a rolling deploy means the new instances compete
+// for a pool the old ones have not released.
+const shutdown = (signal: string): void => {
+  app.log.info({ signal }, "shutting down");
+  void app
+    .close()
+    .then(() => container.dispose())
+    .then(() => {
+      process.exit(0);
+    })
+    .catch((error: unknown) => {
+      app.log.error({ err: error }, "error during shutdown");
+      process.exit(1);
+    });
+};
+
+process.on("SIGTERM", () => {
+  shutdown("SIGTERM");
+});
+process.on("SIGINT", () => {
+  shutdown("SIGINT");
+});
 
 app.listen({ port: config.PORT, host: config.HOST }).catch((error: unknown) => {
   app.log.error(error);

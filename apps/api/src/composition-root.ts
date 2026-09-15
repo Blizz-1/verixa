@@ -1,4 +1,9 @@
 import { loadConfig } from "@verixa/config";
+import {
+  Argon2PasswordHasher,
+  PrismaCredentialsUnitOfWork,
+  RegisterUserWithPassword,
+} from "@verixa/credentials";
 import { PrismaClient } from "@verixa/database";
 import {
   CreateOrganization,
@@ -70,9 +75,15 @@ export interface IdentityUseCases {
   readonly inviteUserToOrganization: InviteUserToOrganization;
 }
 
+/** Use cases spanning identity and credentials. */
+export interface CredentialUseCases {
+  readonly registerUserWithPassword: RegisterUserWithPassword;
+}
+
 export interface Container {
   readonly prisma: PrismaClient;
   readonly identity: IdentityUseCases;
+  readonly credentials: CredentialUseCases;
   /** Releases the database connection. Call on shutdown. */
   readonly dispose: () => Promise<void>;
 }
@@ -92,6 +103,11 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
   const invitations = new PrismaInvitationRepository(prisma);
   const unitOfWork = new PrismaUnitOfWork(prisma);
 
+  // One hasher for the process, not one per request. Its cost parameters are
+  // fixed configuration; constructing it per call would allocate for nothing.
+  const passwordHasher = new Argon2PasswordHasher();
+  const credentialsUnitOfWork = new PrismaCredentialsUnitOfWork(prisma);
+
   // PrismaOrganizationRepository and PrismaOrganizationMembershipRepository
   // aren't constructed here: the only use case that touches them
   // (CreateOrganization) reaches them through the unit of work, since its two
@@ -110,6 +126,9 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
       // organization and a membership, and those must commit together.
       createOrganization: new CreateOrganization(unitOfWork),
       inviteUserToOrganization: new InviteUserToOrganization(invitations),
+    },
+    credentials: {
+      registerUserWithPassword: new RegisterUserWithPassword(credentialsUnitOfWork, passwordHasher),
     },
     dispose: async () => {
       await prisma.$disconnect();

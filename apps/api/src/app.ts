@@ -1,6 +1,27 @@
 import { createLogger, type Logger } from "@verixa/shared-kernel";
 import Fastify from "fastify";
 
+import type { Container } from "./composition-root.js";
+import { registerAuthRoutes } from "./routes/auth.js";
+
+export interface BuildAppOptions {
+  readonly logger?: Logger;
+  /**
+   * The object graph the routes call into.
+   *
+   * Optional so `/health` can be exercised without a database — a health
+   * check that required Postgres to be reachable would be reporting on the
+   * database rather than on the process, and would fail during exactly the
+   * startup window an orchestrator uses it to survive.
+   *
+   * When absent, the authenticated routes are simply not registered. That is
+   * better than registering routes that throw on first use: a 404 says "this
+   * server was not built with that capability", where a 500 says "it is
+   * broken", and only one of those is true.
+   */
+  readonly container?: Container;
+}
+
 /**
  * Return type is inferred rather than annotated as `FastifyInstance`: the
  * default `FastifyInstance` generic assumes Fastify's own `FastifyBaseLogger`
@@ -8,12 +29,22 @@ import Fastify from "fastify";
  * `loggerInstance` produces (Fastify's own type doesn't require `msgPrefix`,
  * for example) — the inferred type is more specific and equally safe.
  */
-export function buildApp(logger: Logger = createLogger({ name: "verixa-api" })) {
+export function buildApp(options: BuildAppOptions = {}) {
+  const logger = options.logger ?? createLogger({ name: "verixa-api" });
   const app = Fastify({ loggerInstance: logger });
 
   app.get("/health", () => {
+    // Deliberately does not touch the database. This answers "is this process
+    // alive and serving", which is what a liveness probe needs; a probe that
+    // also checked Postgres would restart a healthy API during a brief
+    // database blip, turning one outage into two. A readiness endpoint that
+    // *does* check dependencies is a separate concern (Phase 18).
     return { status: "ok" };
   });
+
+  if (options.container !== undefined) {
+    registerAuthRoutes(app, options.container);
+  }
 
   return app;
 }

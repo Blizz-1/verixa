@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@verixa/config": "workspace:*",
+    "@verixa/credentials": "workspace:*",
     "@verixa/database": "workspace:*",
     "@verixa/identity": "workspace:*",
     "@verixa/shared-kernel": "workspace:*",
