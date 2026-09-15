@@ -8,6 +8,7 @@ export type {
   DomainEventPublisher,
 } from "./domain/domain-event.js";
 export {
+  AccountLockedError,
   AuthenticationError,
   ConflictError,
   DomainError,

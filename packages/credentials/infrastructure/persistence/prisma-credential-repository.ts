@@ -11,6 +11,12 @@ export const CredentialMapper = {
       id: asId<"CredentialId">(row.id),
       userId: asId<"UserId">(row.userId),
       passwordHash: row.passwordHash,
+      failedAttempts: row.failedAttempts,
+      // Null in the column, `undefined` in the domain. The database has one
+      // absent value and TypeScript has two; mapping them at the boundary is
+      // what stops `null` leaking inward and forcing every call site to
+      // handle both.
+      lockedUntil: row.lockedUntil ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     });
@@ -21,6 +27,8 @@ export const CredentialMapper = {
       id: credential.id,
       userId: credential.userId,
       passwordHash: credential.passwordHash,
+      failedAttempts: credential.failedAttempts,
+      lockedUntil: credential.lockedUntil ?? null,
       createdAt: credential.createdAt,
       updatedAt: credential.updatedAt,
     };

@@ -1,5 +1,7 @@
 import { createId, type Id } from "@verixa/shared-kernel";
 
+import { type LockoutPolicy, lockDurationMs } from "../value-objects/lockout-policy.js";
+
 export type CredentialId = Id<"CredentialId">;
 
 /**
@@ -16,6 +18,10 @@ interface CredentialProps {
   readonly id: CredentialId;
   readonly userId: CredentialUserId;
   readonly passwordHash: string;
+  /** Consecutive failures since the last success. Reset by a successful login. */
+  readonly failedAttempts: number;
+  /** When the current lock expires, or `undefined` when not locked. */
+  readonly lockedUntil: Date | undefined;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -41,6 +47,8 @@ export class Credential {
   readonly id: CredentialId;
   readonly userId: CredentialUserId;
   readonly passwordHash: string;
+  readonly failedAttempts: number;
+  readonly lockedUntil: Date | undefined;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 
@@ -48,6 +56,8 @@ export class Credential {
     this.id = props.id;
     this.userId = props.userId;
     this.passwordHash = props.passwordHash;
+    this.failedAttempts = props.failedAttempts;
+    this.lockedUntil = props.lockedUntil;
     this.createdAt = props.createdAt;
     this.updatedAt = props.updatedAt;
   }
@@ -68,6 +78,8 @@ export class Credential {
       id: createId<"CredentialId">(),
       userId: params.userId,
       passwordHash: params.passwordHash,
+      failedAttempts: 0,
+      lockedUntil: undefined,
       createdAt: now,
       updatedAt: now,
     });
@@ -85,7 +97,64 @@ export class Credential {
    * Takes a hash, never a plaintext, for the same reason as {@link create}.
    */
   withPasswordHash(passwordHash: string): Credential {
-    return new Credential({ ...this, passwordHash, updatedAt: new Date() });
+    // Clears the lockout too. A password change is a legitimate owner
+    // demonstrating control of the account, so carrying a lock across it
+    // would leave them locked out of the credential they just set -- and
+    // after a reset (Issue 070) that is the one moment they have no way to
+    // wait it out, because the failures were not theirs.
+    return new Credential({
+      ...this,
+      passwordHash,
+      failedAttempts: 0,
+      lockedUntil: undefined,
+      updatedAt: new Date(),
+    });
+  }
+
+  /** Whether the credential is locked at `now`. */
+  isLockedAt(now: Date): boolean {
+    return this.lockedUntil !== undefined && this.lockedUntil.getTime() > now.getTime();
+  }
+
+  /**
+   * Records one failed attempt, locking the credential once the policy's
+   * threshold is reached.
+   *
+   * The counter keeps climbing while locked rather than stopping at the
+   * threshold, which is what makes the backoff exponential: each further
+   * attempt during or after a lock earns a longer next one.
+   */
+  recordFailedAttempt(policy: LockoutPolicy, now: Date = new Date()): Credential {
+    const failedAttempts = this.failedAttempts + 1;
+    const duration = lockDurationMs(failedAttempts, policy);
+
+    return new Credential({
+      ...this,
+      failedAttempts,
+      lockedUntil: duration === 0 ? this.lockedUntil : new Date(now.getTime() + duration),
+      updatedAt: now,
+    });
+  }
+
+  /**
+   * Clears the failure counter and any lock, after a successful login.
+   *
+   * Returns `this` unchanged when there is nothing to clear. That is not a
+   * micro-optimisation: without it every successful login would write a row
+   * that differs only in `updatedAt`, turning the hottest read path in the
+   * system into a write on each request.
+   */
+  recordSuccessfulAttempt(now: Date = new Date()): Credential {
+    if (this.failedAttempts === 0 && this.lockedUntil === undefined) {
+      return this;
+    }
+
+    return new Credential({
+      ...this,
+      failedAttempts: 0,
+      lockedUntil: undefined,
+      updatedAt: now,
+    });
   }
 
   /**
@@ -102,6 +171,8 @@ export class Credential {
       id: this.id,
       userId: this.userId,
       passwordHash: REDACTED,
+      failedAttempts: this.failedAttempts,
+      lockedUntil: this.lockedUntil,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
     };

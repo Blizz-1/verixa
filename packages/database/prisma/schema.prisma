@@ -275,6 +275,22 @@ model Credential {
   /// hashes verifiable after the cost settings are raised.
   passwordHash String @map("password_hash")
 
+  /// Consecutive failed logins since the last success (Issue 067). Reset to
+  /// zero by a successful login, and by a password change.
+  ///
+  /// Keeps climbing while the credential is locked rather than stopping at
+  /// the threshold — that is what makes the backoff exponential, since each
+  /// further attempt earns a longer next lock.
+  failedAttempts Int @default(0) @map("failed_attempts")
+
+  /// When the current lock expires. Null means not locked.
+  ///
+  /// Stored as an expiry rather than a boolean so locks release themselves.
+  /// A `locked` flag would need a scheduled job to clear it, and the failure
+  /// mode of that job not running is an account locked out permanently with
+  /// nothing in the request path to notice.
+  lockedUntil DateTime? @map("locked_until") @db.Timestamptz(3)
+
   createdAt DateTime @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @map("updated_at") @db.Timestamptz(3)
 

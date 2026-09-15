@@ -211,6 +211,85 @@ describe.skipIf(!available)("POST /auth/login", () => {
     });
   });
 
+  describe("lockout over HTTP (Issue 067)", () => {
+    // Uses the production policy — five failures — rather than injecting a
+    // tighter one, because what is being tested here is the wire behaviour of
+    // the container as it is actually wired, not the threshold arithmetic.
+    // That is covered by unit tests that can pick their own numbers.
+    const THRESHOLD = 5;
+
+    async function failFiveTimes(): Promise<void> {
+      for (let attempt = 0; attempt < THRESHOLD; attempt += 1) {
+        const response = await client.request
+          .post("/auth/login")
+          .send({ ...CREDENTIALS, password: "wrong password entirely" });
+        expect(response.status).toBe(401);
+      }
+    }
+
+    it("locks the credential after repeated failures", async () => {
+      await registerAlice();
+      await failFiveTimes();
+
+      const credential = await prisma.credential.findFirst();
+      expect(credential?.failedAttempts).toBe(THRESHOLD);
+      expect(credential?.lockedUntil).not.toBeNull();
+      expect(credential?.lockedUntil?.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it("refuses the correct password once locked", async () => {
+      await registerAlice();
+      await failFiveTimes();
+
+      const response = await client.request.post("/auth/login").send(CREDENTIALS);
+
+      expect(response.status).toBe(401);
+    });
+
+    it("is indistinguishable from any other failure on the wire", async () => {
+      // The assertion this whole design exists for. Lockout state only exists
+      // for accounts that exist, so a 423, a Retry-After header, or a
+      // different code would turn "fail five times and watch what changes"
+      // into an account enumeration oracle.
+      //
+      // Checked at the HTTP layer specifically: the use case returns a
+      // *distinct* error type here, and it is only the deliberate choice of
+      // identical code, status and message that keeps the response the same.
+      // A well-meaning refactor mapping AccountLockedError to its own status
+      // would reopen the hole with every unit test still green.
+      await registerAlice();
+      await failFiveTimes();
+
+      const locked = await client.request.post("/auth/login").send(CREDENTIALS);
+      const unknownAccount = await client.request
+        .post("/auth/login")
+        .send({ email: "nobody@example.com", password: CREDENTIALS.password });
+
+      expect(locked.status).toBe(unknownAccount.status);
+      expect(locked.body).toEqual(unknownAccount.body);
+      expect(asError(locked.body).error.code).toBe("AUTHENTICATION_FAILED");
+      expect(locked.headers["retry-after"]).toBeUndefined();
+    });
+
+    it("resets the counter after a successful login", async () => {
+      await registerAlice();
+
+      for (let attempt = 0; attempt < THRESHOLD - 1; attempt += 1) {
+        await client.request
+          .post("/auth/login")
+          .send({ ...CREDENTIALS, password: "wrong password entirely" });
+      }
+      expect((await prisma.credential.findFirst())?.failedAttempts).toBe(THRESHOLD - 1);
+
+      const success = await client.request.post("/auth/login").send(CREDENTIALS);
+      expect(success.status).toBe(200);
+
+      const credential = await prisma.credential.findFirst();
+      expect(credential?.failedAttempts).toBe(0);
+      expect(credential?.lockedUntil).toBeNull();
+    });
+  });
+
   it("does not modify the credential on a successful login", async () => {
     // The hasher is at current parameters, so `needsRehash` is false and the
     // stored hash must be left exactly as it was. A login that rewrote the

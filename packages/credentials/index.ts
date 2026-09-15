@@ -8,6 +8,11 @@ export {
   type CredentialUserId,
 } from "./domain/entities/credential.js";
 export {
+  DEFAULT_LOCKOUT_POLICY,
+  lockDurationMs,
+  type LockoutPolicy,
+} from "./domain/value-objects/lockout-policy.js";
+export {
   type BreachedPasswordChecker,
   DEFAULT_PASSWORD_POLICY,
   type PasswordPolicy,
@@ -26,6 +31,7 @@ export type { PasswordHasher } from "./application/ports/password-hasher.js";
 export {
   AuthenticateWithPassword,
   type AuthenticateWithPasswordCommand,
+  type AuthenticateWithPasswordError,
   type AuthenticateWithPasswordResult,
 } from "./application/use-cases/authenticate-with-password.js";
 export {

@@ -12,15 +12,16 @@ The HTTP surface is `POST /auth/login` in `apps/api/src/routes/auth.ts`.
 **Every failed login returns the same error, in the same time, whatever went
 wrong.**
 
-There are five ways authentication can fail:
+There are six ways authentication can fail:
 
 1. No account with that email address.
 2. The email address was not even well-formed.
 3. The account exists but has no password credential (SSO-only, passkey-only).
 4. The password was wrong.
 5. The account is suspended.
+6. The credential is locked after repeated failures.
 
-A caller can distinguish none of them. All five produce
+A caller can distinguish none of them. All six produce
 `AUTHENTICATION_FAILED`, HTTP 401, message `Invalid email or password.`, with
 no field errors.
 
@@ -113,6 +114,79 @@ for unverified accounts is Phase 07's concern, and it can see the status.
 The set of authenticable statuses is written as an allowlist rather than as
 `status !== "suspended"`, so adding a state to `UserStatus` fails closed: a new
 status is not authenticable until someone decides it is.
+
+## Account lockout
+
+After five consecutive failures a credential locks for a minute, and each
+further attempt doubles that up to an hour. A successful login resets the
+counter; so does a password change.
+
+Implementation: `packages/credentials/domain/value-objects/lockout-policy.ts`
+and the lockout fields on `Credential`.
+
+### Why exponential, and why capped
+
+A fixed window is close to useless against a patient attacker. Locking for
+fifteen minutes after five attempts still permits roughly 480 guesses a day,
+forever. Doubling makes a sustained campaign collapse into impracticality
+within a handful of rounds, while costing a user who mistypes twice nothing at
+all.
+
+The cap matters as much as the growth. Unbounded backoff is a denial of
+service handed to attackers: anyone who knows an address could lock its owner
+out for years by failing enough times. With a ceiling, lockout stays a speed
+bump for the attacker rather than a weapon against the user — and account
+recovery (Issue 069) is the escape hatch that makes even the ceiling
+survivable.
+
+### The tension with enumeration resistance, and how it is resolved
+
+Issue 067 asks for a "distinct (but still enumeration-safe) error". Those two
+requirements pull against each other, and it is worth being explicit about how
+far each is honoured.
+
+Lockout state exists **only for accounts that exist**. So any difference a
+client can observe — a 423, a `Retry-After` header, a different error code —
+converts "fail five times against this address and watch what changes" into an
+account enumeration oracle, undoing the property the rest of this document is
+about.
+
+The resolution: the error is distinct **as a type** and identical **on the
+wire**. `AccountLockedError` is a separate class, so the application layer,
+audit log and Phase 18 metrics can tell a lockout from an ordinary bad
+password — genuinely different operational signals, and collapsing them would
+make a credential-stuffing campaign look like user error. Its `code`,
+`httpStatusHint` and `message` are deliberately identical to
+`AuthenticationError`, so the HTTP response is byte-for-byte the same.
+
+**What is not solved:** a fully enumeration-safe _visible_ lockout would
+require tracking attempts for addresses that have no account, so that unknown
+addresses lock too. That is a different shape — it needs a store keyed by
+submitted address rather than by credential, with its own storage and
+denial-of-service tradeoffs — and it belongs with Phase 15's rate limiting
+rather than here.
+
+### Ordering: lockout before the password check
+
+The lock is the one thing checked _ahead_ of hashing, unlike account status.
+Refusing to spend the CPU is most of the defence — verifying first would hand
+an attacker exactly the expensive operation they were being denied.
+
+That makes the locked path the fastest in the use case, which would announce
+"this address has an account and someone is attacking it" through response
+time alone. So the decoy verification runs on this path too.
+
+### Why an expiry rather than a flag
+
+`locked_until` is a timestamp, not a `locked` boolean. A flag needs something
+to come along and clear it, and the failure mode of that scheduled job not
+running is an account locked out permanently, with nothing in the request path
+able to notice. An expiry releases itself: the comparison that decides whether
+a credential is locked is the same one that decides it no longer is.
+
+The failure counter also keeps climbing _during_ a lock rather than freezing at
+the threshold. That is what makes the backoff exponential — each further
+attempt earns a longer next lock.
 
 ## Transparent rehashing
 

@@ -79,3 +79,31 @@ export class AuthenticationError extends DomainError {
     super(message, options);
   }
 }
+
+/**
+ * Authentication was refused because the credential is temporarily locked
+ * after repeated failures.
+ *
+ * Distinct from {@link AuthenticationError} so the application layer, audit
+ * log and metrics can tell a lockout from an ordinary bad password — those
+ * are very different operational signals, and collapsing them would make a
+ * credential-stuffing campaign look like ordinary user error.
+ *
+ * **The HTTP layer deliberately renders it identically to
+ * {@link AuthenticationError}**: same 401, same body, same message. That is
+ * not an oversight in the mapping. Lockout state exists only for accounts
+ * that exist, so any observable difference — a 423, a `Retry-After`, a
+ * different code — turns "fail five times and watch what changes" into an
+ * account enumeration oracle, undoing what `AuthenticationError` is for.
+ *
+ * The distinction is therefore internal by design: visible in logs, invisible
+ * on the wire. See `docs/security/authentication-flows.md`.
+ */
+export class AccountLockedError extends DomainError {
+  readonly code = "AUTHENTICATION_FAILED";
+  readonly httpStatusHint = 401;
+
+  constructor(message = "Invalid email or password.", options?: ErrorOptions) {
+    super(message, options);
+  }
+}

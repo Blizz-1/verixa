@@ -1,7 +1,11 @@
 import { Email, type User, type UserStatus } from "@verixa/identity";
-import { AuthenticationError, Result } from "@verixa/shared-kernel";
+import { AccountLockedError, AuthenticationError, Result } from "@verixa/shared-kernel";
 
 import type { Credential } from "../../domain/entities/credential.js";
+import {
+  DEFAULT_LOCKOUT_POLICY,
+  type LockoutPolicy,
+} from "../../domain/value-objects/lockout-policy.js";
 import type { CredentialsUnitOfWork } from "../ports/credentials-unit-of-work.js";
 import type { PasswordHasher } from "../ports/password-hasher.js";
 
@@ -15,6 +19,8 @@ export interface AuthenticateWithPasswordResult {
   /** True when the stored hash was upgraded during this login. Diagnostic only. */
   readonly rehashed: boolean;
 }
+
+export type AuthenticateWithPasswordError = AuthenticationError | AccountLockedError;
 
 /**
  * Decoy hashes, one per hasher, used to burn time when there is no real
@@ -49,6 +55,20 @@ function decoy(hasher: PasswordHasher): Promise<string> {
   }
   return pending;
 }
+
+/**
+ * What the authentication transaction concluded.
+ *
+ * A discriminated union rather than `Credential | undefined`, because
+ * "locked" and "failed" have to be distinguishable to the caller (they are
+ * different operational signals) while being indistinguishable to the client.
+ * Collapsing them here would make the second property impossible to state and
+ * the first impossible to measure.
+ */
+type Outcome =
+  | { readonly kind: "ok"; readonly user: User; readonly credential: Credential }
+  | { readonly kind: "failed" }
+  | { readonly kind: "locked" };
 
 /**
  * Account statuses whose owner may still prove who they are.
@@ -113,11 +133,12 @@ export class AuthenticateWithPassword {
   constructor(
     private readonly unitOfWork: CredentialsUnitOfWork,
     private readonly passwordHasher: PasswordHasher,
+    private readonly lockoutPolicy: LockoutPolicy = DEFAULT_LOCKOUT_POLICY,
   ) {}
 
   async execute(
     command: AuthenticateWithPasswordCommand,
-  ): Promise<Result<AuthenticateWithPasswordResult, AuthenticationError>> {
+  ): Promise<Result<AuthenticateWithPasswordResult, AuthenticateWithPasswordError>> {
     // A malformed address is not a validation error here, unlike everywhere
     // else in the codebase. `Email.create` rejecting "not-an-email" is a
     // perfectly good 400 during registration; on a login endpoint it tells an
@@ -130,7 +151,9 @@ export class AuthenticateWithPassword {
       return Result.err(new AuthenticationError());
     }
 
-    const verified = await this.unitOfWork.run(async (repositories) => {
+    const now = new Date();
+
+    const outcome = await this.unitOfWork.run<Outcome>(async (repositories) => {
       // Excludes soft-deleted users, which is the behaviour wanted here: a
       // deleted account must not be loggable into, and `findByEmail` already
       // encodes that. Worth noting rather than assuming, because the choice
@@ -139,7 +162,7 @@ export class AuthenticateWithPassword {
       const user = await repositories.users.findByEmail(emailResult.value);
       if (user === undefined) {
         await this.burnTime(command.password);
-        return undefined;
+        return { kind: "failed" };
       }
 
       const credential = await repositories.credentials.findByUserId(user.id);
@@ -148,12 +171,38 @@ export class AuthenticateWithPassword {
         // and must not reveal that by failing faster or differently than a
         // wrong password would.
         await this.burnTime(command.password);
-        return undefined;
+        return { kind: "failed" };
+      }
+
+      // Checked before the password is verified, which is the one place this
+      // use case deliberately short-circuits ahead of the hash. That is the
+      // entire point of lockout — refusing to spend the CPU is most of the
+      // defence against credential stuffing, and verifying first would hand
+      // an attacker the expensive operation they were being denied.
+      //
+      // It does mean the fast path is now observably faster, so the decoy
+      // runs here too. Without it a locked account would return in
+      // microseconds while every other failure paid for an argon2
+      // verification, and the response time would announce "this address has
+      // an account, and someone has been attacking it".
+      if (credential.isLockedAt(now)) {
+        await this.burnTime(command.password);
+        // The counter keeps climbing during a lock rather than freezing at
+        // the threshold. That is what makes the backoff exponential: each
+        // further attempt earns a longer next lock, so a sustained campaign
+        // collapses into impracticality within a few rounds.
+        await repositories.credentials.save(
+          credential.recordFailedAttempt(this.lockoutPolicy, now),
+        );
+        return { kind: "locked" };
       }
 
       const matches = await this.passwordHasher.verify(command.password, credential.passwordHash);
       if (!matches) {
-        return undefined;
+        await repositories.credentials.save(
+          credential.recordFailedAttempt(this.lockoutPolicy, now),
+        );
+        return { kind: "failed" };
       }
 
       // Only *after* the password is confirmed. Checking account status
@@ -173,16 +222,37 @@ export class AuthenticateWithPassword {
       // conflating the two is how a product ends up unable to tell an
       // unverified user why they are stuck. Authorization for unverified
       // accounts belongs to Phase 07's RBAC work, which can see the status.
+      //
+      // No failure is recorded here: the password was correct, so counting it
+      // against the lockout threshold would punish the account holder for the
+      // administrative state of their own account.
       if (!CAN_AUTHENTICATE.has(user.status)) {
-        return undefined;
+        return { kind: "failed" };
       }
 
-      return { user, credential };
+      // Clearing the counter is what makes the threshold count *consecutive*
+      // failures. Without it, five mistyped passwords spread over a year —
+      // each followed by a successful login — would lock the account on the
+      // fifth, which is indistinguishable from an attack only if you never
+      // look at the gaps between them.
+      //
+      // Returns the same instance when there is nothing to clear, so the
+      // common case does not write a row on every login.
+      const cleared = credential.recordSuccessfulAttempt(now);
+      if (cleared !== credential) {
+        await repositories.credentials.save(cleared);
+      }
+
+      return { kind: "ok", user, credential: cleared };
     });
 
-    if (verified === undefined) {
+    if (outcome.kind === "locked") {
+      return Result.err(new AccountLockedError());
+    }
+    if (outcome.kind === "failed") {
       return Result.err(new AuthenticationError());
     }
+    const verified = { user: outcome.user, credential: outcome.credential };
 
     // Deliberately outside the transaction above.
     //
