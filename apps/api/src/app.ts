@@ -31,7 +31,27 @@ export interface BuildAppOptions {
  */
 export function buildApp(options: BuildAppOptions = {}) {
   const logger = options.logger ?? createLogger({ name: "verixa-api" });
-  const app = Fastify({ loggerInstance: logger });
+  const app = Fastify({
+    loggerInstance: logger,
+    ajv: {
+      customOptions: {
+        /**
+         * Reject unknown properties instead of silently stripping them.
+         *
+         * Fastify's default is `removeAdditional: true`, which deletes
+         * anything not in the schema and continues — so a request setting a
+         * field the API does not accept succeeds, and the client believes it
+         * took effect. Posting `status: "active"` to registration and getting
+         * a 201 back is exactly that failure: nothing went wrong visibly, and
+         * the client's assumption is now wrong.
+         *
+         * Rejecting turns a silent misunderstanding into a 400 the caller can
+         * act on. CI caught this: a test asserting rejection got a 201.
+         */
+        removeAdditional: false,
+      },
+    },
+  });
 
   app.get("/health", () => {
     // Deliberately does not touch the database. This answers "is this process
