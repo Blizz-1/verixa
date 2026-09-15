@@ -52,6 +52,9 @@ pnpm install
 pnpm --filter @verixa/audit demo
 ```
 
+(The demo builds the packages it needs first, so this is genuinely the whole
+setup — no database, no keys, no `.env`.)
+
 It funds a throwaway testnet account from friendbot, records audit events,
 chains them, anchors the head, then verifies the commitment by reading it back
 off the ledger the way a third party would — and confirms a tampered hash is

@@ -12,7 +12,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
-    "demo": "tsx scripts/anchor-demo.ts"
+    "demo": "pnpm --filter @verixa/audit^... run build && tsx scripts/anchor-demo.ts"
   },
   "dependencies": {
     "@verixa/shared-kernel": "workspace:*"
