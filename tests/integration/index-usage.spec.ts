@@ -119,9 +119,10 @@ describe.skipIf(!available)("index usage (Issue 055)", () => {
     // is the *correct* plan and asserting an index scan would be asserting
     // that the planner is wrong — the same trap this file's header warns
     // about. Only the row count makes the slug assertion meaningful.
+    const bulkOrganizationIds = Array.from({ length: ROW_COUNT }, () => randomUUID());
     await prisma.organization.createMany({
-      data: Array.from({ length: ROW_COUNT }, (_unused, offset) => ({
-        id: randomUUID(),
+      data: bulkOrganizationIds.map((id, offset) => ({
+        id,
         name: `Bulk Org ${String(offset)}`,
         slug: `bulk-org-${String(offset)}`,
         ownerId: OWNER_ID,
@@ -131,20 +132,55 @@ describe.skipIf(!available)("index usage (Issue 055)", () => {
       })),
     });
 
+    /**
+     * How many child rows hang off ORG_ID, as opposed to one of the bulk
+     * organizations.
+     *
+     * This number is the point of the whole seed. Putting every membership
+     * and invitation on ORG_ID makes `WHERE organization_id = $1` match 100%
+     * of the table, and a sequential scan is then genuinely the faster plan —
+     * Postgres would be right to choose it, and an assertion demanding an
+     * index would be asserting the planner is broken. Spreading the rows so
+     * ORG_ID holds a small slice is what makes the predicate selective, and
+     * selectivity is the only reason an index is ever the better answer.
+     *
+     * Kept comfortably above `LIMIT 50` so the limit is not what makes the
+     * query cheap, and well under the ~5-10% where a scan takes over again.
+     */
+    const ROWS_ON_TARGET_ORG = 60;
+
+    /** ORG_ID for the first rows, spread across the bulk orgs thereafter. */
+    function organizationFor(offset: number): string {
+      if (offset < ROWS_ON_TARGET_ORG) return ORG_ID;
+      return bulkOrganizationIds[offset % bulkOrganizationIds.length] ?? ORG_ID;
+    }
+
     await prisma.organizationMembership.createMany({
-      data: users.slice(0, ROW_COUNT).map((user) => ({
-        id: randomUUID(),
-        userId: user.id,
-        organizationId: ORG_ID,
-        status: "revoked" as const,
-        joinedAt: now,
-      })),
+      data: [
+        // The owner's own membership, which the composite-index test below
+        // looks for by name. Without it that test asserts an index is used to
+        // find nothing, which is a weaker claim than it appears to make.
+        {
+          id: randomUUID(),
+          userId: OWNER_ID,
+          organizationId: ORG_ID,
+          status: "active" as const,
+          joinedAt: now,
+        },
+        ...users.map((user, offset) => ({
+          id: randomUUID(),
+          userId: user.id,
+          organizationId: organizationFor(offset),
+          status: "revoked" as const,
+          joinedAt: now,
+        })),
+      ],
     });
 
     await prisma.invitation.createMany({
-      data: Array.from({ length: ROW_COUNT }, () => ({
+      data: Array.from({ length: ROW_COUNT }, (_unused, offset) => ({
         id: randomUUID(),
-        organizationId: ORG_ID,
+        organizationId: organizationFor(offset),
         invitedByUserId: OWNER_ID,
         email: `invite-${randomUUID()}@example.com`,
         tokenHash: randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, ""),

@@ -40,6 +40,36 @@ RUN pnpm --filter @verixa/api... run build
 # directory. This is what actually ships; nothing else from /repo does.
 RUN pnpm --filter=@verixa/api deploy /out --prod
 
+# Generate again, into the bundle.
+#
+# `deploy --prod` builds /out a fresh node_modules from the store rather than
+# copying /repo's, so the client generated above — which lives *inside*
+# node_modules, at the default output location — does not come with it. The
+# bundle ships an @prisma/client that has never been generated, and the first
+# `new PrismaClient()` throws "@prisma/client did not initialize yet".
+#
+# Nothing before this point can notice: the image builds, and the package
+# imports fine. Only constructing the client fails, which happens once the
+# process is already starting.
+RUN pnpm --filter @verixa/database exec prisma generate \
+      --schema /out/node_modules/@verixa/database/prisma/schema.prisma
+
+# Prove the bundle actually loads before shipping it.
+#
+# Two separate production-only failures reached CI from this Dockerfile —
+# a CommonJS/ESM interop error at import, then the ungenerated client above —
+# and neither was catchable by build, lint, typecheck or the test suite,
+# because none of those load the deployed bundle through Node's ESM loader.
+# This line does exactly that, so the next one fails here, loudly, at build
+# time, rather than as a healthcheck that times out with the reason buried in
+# container logs.
+#
+# The URL is a placeholder: PrismaClient's constructor requires one but does
+# not connect, and connecting is not what is being tested.
+RUN cd /out \
+      && DATABASE_URL="postgresql://verixa:verixa@127.0.0.1:5432/verixa" \
+         node --input-type=module -e "const { PrismaClient } = await import('@verixa/database'); new PrismaClient(); console.log('deploy bundle loads and the prisma client initialises');"
+
 # ---- runtime: minimal image, non-root, only the deployed bundle ----
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
