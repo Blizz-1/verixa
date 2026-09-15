@@ -24,6 +24,11 @@ export type { PasswordHasher } from "./application/ports/password-hasher.js";
 
 // Application: use cases
 export {
+  AuthenticateWithPassword,
+  type AuthenticateWithPasswordCommand,
+  type AuthenticateWithPasswordResult,
+} from "./application/use-cases/authenticate-with-password.js";
+export {
   RegisterUserWithPassword,
   type RegisterUserWithPasswordCommand,
   type RegisterUserWithPasswordError,

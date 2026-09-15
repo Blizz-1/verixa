@@ -1,6 +1,7 @@
 import { loadConfig } from "@verixa/config";
 import {
   Argon2PasswordHasher,
+  AuthenticateWithPassword,
   PrismaCredentialsUnitOfWork,
   RegisterUserWithPassword,
 } from "@verixa/credentials";
@@ -78,6 +79,7 @@ export interface IdentityUseCases {
 /** Use cases spanning identity and credentials. */
 export interface CredentialUseCases {
   readonly registerUserWithPassword: RegisterUserWithPassword;
+  readonly authenticateWithPassword: AuthenticateWithPassword;
 }
 
 export interface Container {
@@ -129,6 +131,11 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
     },
     credentials: {
       registerUserWithPassword: new RegisterUserWithPassword(credentialsUnitOfWork, passwordHasher),
+      // Shares the hasher instance with registration deliberately. Beyond
+      // avoiding a second allocation, the timing decoy that hides whether an
+      // account exists is cached per hasher, so a second instance would build
+      // its own on the first failed login.
+      authenticateWithPassword: new AuthenticateWithPassword(credentialsUnitOfWork, passwordHasher),
     },
     dispose: async () => {
       await prisma.$disconnect();
