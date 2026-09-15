@@ -15,7 +15,6 @@
     "demo": "tsx scripts/anchor-demo.ts"
   },
   "dependencies": {
-    "@verixa/database": "workspace:*",
     "@verixa/shared-kernel": "workspace:*",
     "@verixa/stellar-anchor": "workspace:*"
   },

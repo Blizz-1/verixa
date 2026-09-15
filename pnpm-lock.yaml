@@ -55,7 +55,7 @@ importers:
     dependencies:
       '@verixa/audit':
         specifier: workspace:*
-        version: file:packages/audit(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(supports-color@7.2.0)(typescript@5.9.3)
+        version: file:packages/audit(supports-color@7.2.0)
       '@verixa/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -102,9 +102,6 @@ importers:
 
   packages/audit:
     dependencies:
-      '@verixa/database':
-        specifier: workspace:*
-        version: link:../database
       '@verixa/shared-kernel':
         specifier: workspace:*
         version: link:../shared-kernel
@@ -285,7 +282,7 @@ importers:
         version: link:../apps/api
       '@verixa/audit':
         specifier: workspace:*
-        version: file:packages/audit(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(supports-color@7.2.0)(typescript@5.9.3)
+        version: file:packages/audit(supports-color@7.2.0)
       '@verixa/credentials':
         specifier: workspace:*
         version: link:../packages/credentials
@@ -1403,9 +1400,6 @@ packages:
 
   '@verixa/audit@file:packages/audit':
     resolution: {directory: packages/audit, type: directory}
-
-  '@verixa/database@file:packages/database':
-    resolution: {directory: packages/database, type: directory}
 
   '@verixa/shared-kernel@file:packages/shared-kernel':
     resolution: {directory: packages/shared-kernel, type: directory}
@@ -4005,23 +3999,13 @@ snapshots:
   '@unrs/resolver-binding-win32-x64-msvc@1.12.2':
     optional: true
 
-  '@verixa/audit@file:packages/audit(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(supports-color@7.2.0)(typescript@5.9.3)':
+  '@verixa/audit@file:packages/audit(supports-color@7.2.0)':
     dependencies:
-      '@verixa/database': file:packages/database(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)
       '@verixa/shared-kernel': file:packages/shared-kernel
       '@verixa/stellar-anchor': file:packages/stellar-anchor(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
     transitivePeerDependencies:
       - debug
-      - prisma
       - supports-color
-      - typescript
-
-  '@verixa/database@file:packages/database(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)':
-    dependencies:
-      '@prisma/client': 6.19.3(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)
-    transitivePeerDependencies:
-      - prisma
-      - typescript
 
   '@verixa/shared-kernel@file:packages/shared-kernel':
     dependencies:

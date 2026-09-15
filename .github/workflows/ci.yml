@@ -72,6 +72,26 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # Re-sync injected workspace packages after building them.
+      #
+      # `injectWorkspacePackages: true` (required for `pnpm deploy`, which
+      # builds the Docker image) makes pnpm *copy* some workspace packages into
+      # their dependents' node_modules rather than symlinking. Which ones get
+      # copied is decided by peer-dependency resolution -- @verixa/audit and
+      # @verixa/stellar-anchor are copied because the Stellar SDK pulls
+      # `debug`/`supports-color` peers, while @verixa/identity is symlinked.
+      #
+      # Those copies are made during install, when no package has a `dist` yet.
+      # pnpm refreshes them before running a dependent's own script, so a
+      # package that builds gets fresh copies -- but `tests` has no build
+      # script, so its copies stayed empty and every integration spec failed
+      # with "Failed to resolve entry for package @verixa/audit".
+      #
+      # Invisible locally, because a developer's node_modules has been through
+      # an install *after* a build at some point. Only a clean checkout hits it.
+      - name: Re-link workspace packages
+        run: pnpm install --frozen-lockfile
+
       # Proves the migration pipeline actually works end to end against a
       # real Postgres: Prisma connects using DATABASE_URL, creates its
       # _prisma_migrations tracking table, and applies every migration in
@@ -159,6 +179,26 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # Re-sync injected workspace packages after building them.
+      #
+      # `injectWorkspacePackages: true` (required for `pnpm deploy`, which
+      # builds the Docker image) makes pnpm *copy* some workspace packages into
+      # their dependents' node_modules rather than symlinking. Which ones get
+      # copied is decided by peer-dependency resolution -- @verixa/audit and
+      # @verixa/stellar-anchor are copied because the Stellar SDK pulls
+      # `debug`/`supports-color` peers, while @verixa/identity is symlinked.
+      #
+      # Those copies are made during install, when no package has a `dist` yet.
+      # pnpm refreshes them before running a dependent's own script, so a
+      # package that builds gets fresh copies -- but `tests` has no build
+      # script, so its copies stayed empty and every integration spec failed
+      # with "Failed to resolve entry for package @verixa/audit".
+      #
+      # Invisible locally, because a developer's node_modules has been through
+      # an install *after* a build at some point. Only a clean checkout hits it.
+      - name: Re-link workspace packages
+        run: pnpm install --frozen-lockfile
 
       # Only the identity package: it owns the Prisma repository contract
       # suite, which is what actually needs a database here.
