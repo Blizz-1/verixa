@@ -41,7 +41,11 @@ jobs:
     name: Architecture boundaries
     runs-on: ubuntu-latest
     steps:
+      # Full history: the adapter check below diffs against the base branch,
+      # and a shallow clone has no base branch to diff against.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
