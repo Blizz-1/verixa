@@ -76,5 +76,40 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Layering enforcement, which is the rule this whole architecture rests
+    // on and the one a new contributor breaks first.
+    //
+    // Domain and application code must not reach for infrastructure. A domain
+    // entity that imports Prisma cannot be unit-tested without a database, and
+    // a use case that imports Fastify cannot be reused outside HTTP — at which
+    // point the ports are decoration and the layering is a naming convention.
+    //
+    // The fix, when this fires, is almost always to define a port in
+    // `application/ports/` and let the composition root supply the adapter.
+    // See docs/guides/domain-modeling.md.
+    files: ["packages/*/domain/**/*.ts", "packages/*/application/**/*.ts"],
+    ignores: ["**/*.spec.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "**/infrastructure/**",
+                "@prisma/client",
+                "@verixa/database",
+                "fastify",
+                "@stellar/stellar-sdk",
+              ],
+              message:
+                "Domain and application layers must not import infrastructure. Define a port in `application/ports/` and wire the concrete implementation in the composition root instead. See docs/guides/domain-modeling.md.",
+            },
+          ],
+        },
+      ],
+    },
+  },
   eslintConfigPrettier,
 );
