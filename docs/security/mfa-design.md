@@ -1,0 +1,15 @@
+# Multi-Factor Authentication (MFA) Design
+
+## TOTP Enrollment
+
+When a user begins the TOTP enrollment process, we generate a CSPRNG base32 secret and an \otpauth://\ provisioning URI. 
+
+**Why we persist a \pending\ method immediately:**
+We persist the \MfaMethod\ immediately in a \pending\ state, rather than waiting for the first successful verification to persist anything.
+*Alternative considered:* Hold the secret in a session or client-side, and only write to the database once confirmed (Issue 104).
+*Reason rejected:* Storing the secret in a session requires distributed session state and complicates cross-device enrollment. Persisting as \pending\ is stateless for the API servers, avoids session bloat, and crucially ensures that we can strictly rate-limit confirmation attempts against a stable database record.
+
+**Why the secret is returned exactly once:**
+The enrollment use case returns the plaintext secret and provisioning URI exactly once to the caller.
+*Alternative considered:* Store the secret in plaintext or allow re-retrieval.
+*Reason rejected:* TOTP secrets cannot be one-way hashed because the server needs the plaintext to compute expected codes during login. However, storing them in plaintext is a severe risk in a database breach. We rely on symmetric encryption-at-rest at the storage layer (Issue 107). The plaintext is returned once to the caller solely to generate the QR code, minimizing its exposure. If a user fails to scan the QR code, they must generate a new pending method rather than retrieve the old secret.

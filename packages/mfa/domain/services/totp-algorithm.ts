@@ -1,0 +1,1 @@
+import { Result } from "@verixa/shared-kernel"; import type { TotpSecret } from "../value-objects/totp-secret.js"; export interface TotpAlgorithm { generateSecret(accountName: string, issuer?: string): Promise<TotpSecret>; }
