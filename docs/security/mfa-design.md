@@ -22,3 +22,12 @@ To transition a \pending\ method to \ctive\, the user must provide a valid 6-di
 Even though the method is not yet gating a session, guessing attempts against the \pending\ method are rate-limited.
 *Alternative considered:* Only rate-limit authentication challenges, since an unconfirmed secret doesn't gate access yet.
 *Reason rejected:* A 6-digit code has only 1,000,000 possibilities. Unthrottled guessing within the 30-second window is computationally trivial for an attacker. If an attacker guesses the code for a pending method (e.g. they know the user is currently enrolling), they can activate it on behalf of the user, locking the user out or establishing a persistent backdoor. Rate-limiting the \pending\ state is as important as the \ctive\ state.
+
+## TOTP Verification & Replay Protection
+
+During login or step-up authentication, the server verifies a submitted TOTP code against an \ctive\ method, allowing a minor configurable clock drift (e.g., ±1 time step).
+
+**Why we track the \lastUsedStep\:**
+Clock-drift tolerance is a usability necessity (phones and servers rarely agree to the second), but each extra step widens the window in which a single 6-digit code is valid.
+*Alternative considered:* Accept any code that mathematically validates within the current or adjacent time step without persistent state.
+*Reason rejected:* Accepting a code unconditionally enables immediate replay attacks within the 30-90 second validity window. If a user enters their code on a compromised network or phishing proxy, the attacker could reuse the same code milliseconds later. By persisting the \lastUsedStep\ on the \MfaMethod\ and strictly rejecting any authentication attempt that maps to a step less than or equal to it, we completely neutralize replay attacks within the drift window.

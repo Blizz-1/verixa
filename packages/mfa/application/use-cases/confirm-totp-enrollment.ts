@@ -55,8 +55,8 @@ export class ConfirmTotpEnrollment {
       return Result.err(new Error("MFA method is missing its secret."));
     }
 
-    const isValid = await this.totpAlgorithm.verify(method.secret, command.code);
-    if (!isValid) {
+    const matchedStep = await this.totpAlgorithm.verify(method.secret, command.code);
+    if (matchedStep === null) {
       const updatedMethod = method.recordFailedAttempt(now);
       await this.mfaMethodRepository.save(updatedMethod);
       return Result.err(new Error("Invalid TOTP code."));

@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import { MfaMethod } from "../../domain/entities/mfa-method.js";
 import type { TotpAlgorithm } from "../../domain/services/totp-algorithm.js";
 import type { MfaMethodRepository } from "../ports/mfa-method-repository.js";
-import { ConfirmTotpEnrollment } from "./confirm-totp-enrollment.js";
+import { VerifyTotpChallenge } from "./verify-totp-challenge.js";
 
-describe("ConfirmTotpEnrollment", () => {
+describe("VerifyTotpChallenge", () => {
   const setup = () => {
     const savedMethods = new Map<string, MfaMethod>();
     
@@ -20,69 +20,74 @@ describe("ConfirmTotpEnrollment", () => {
 
     const fakeAlgo: TotpAlgorithm = {
       generateSecret: async (name) => ({ value: "SECRET", provisioningUri: "uri" }),
-      verify: async (secret, code) => code === "123456" ? 1000 : null
+      verify: async (secret, code, drift) => {
+        if (code === "VALID1") return 1000;
+        if (code === "VALID2") return 1001; // Next step
+        return null;
+      }
     };
 
-    const useCase = new ConfirmTotpEnrollment(fakeRepo, fakeAlgo);
+    const useCase = new VerifyTotpChallenge(fakeRepo, fakeAlgo);
 
     return { fakeRepo, fakeAlgo, useCase, savedMethods };
   };
 
-  it("activates the method when given the correct code", async () => {
+  it("verifies a valid code and updates lastUsedAt and lastUsedStep", async () => {
     const { useCase, fakeRepo, savedMethods } = setup();
     const secret = { value: "SECRET", provisioningUri: "uri" };
-    const method = MfaMethod.createPendingTotp(createId<"UserId">(), secret);
+    let method = MfaMethod.createPendingTotp(createId<"UserId">(), secret).activate();
     await fakeRepo.save(method);
 
     const result = await useCase.execute({
       methodId: method.id,
-      code: "123456" // correct code
+      code: "VALID1"
     });
 
     expect(result.isOk()).toBe(true);
     const updated = savedMethods.get(method.id)!;
-    expect(updated.status).toBe("active");
+    expect(updated.lastUsedStep).toBe(1000);
+    expect(updated.lastUsedAt).toBeDefined();
     expect(updated.failedAttempts).toBe(0);
   });
 
-  it("leaves the method pending and records a failed attempt on bad code", async () => {
+  it("rejects code replay within the same or earlier step", async () => {
     const { useCase, fakeRepo, savedMethods } = setup();
     const secret = { value: "SECRET", provisioningUri: "uri" };
-    const method = MfaMethod.createPendingTotp(createId<"UserId">(), secret);
+    // Method already used at step 1000
+    let method = MfaMethod.createPendingTotp(createId<"UserId">(), secret)
+      .activate()
+      .recordUse(1000, new Date());
     await fakeRepo.save(method);
 
+    // Try to reuse a code that matches step 1000
     const result = await useCase.execute({
       methodId: method.id,
-      code: "000000" // wrong code
+      code: "VALID1" // Maps to 1000
     });
 
     expect(result.isErr()).toBe(true);
-    const updated = savedMethods.get(method.id)!;
-    expect(updated.status).toBe("pending");
-    expect(updated.failedAttempts).toBe(1);
-  });
-
-  it("rejects confirmation if the method is already active", async () => {
-    const { useCase, fakeRepo } = setup();
-    const secret = { value: "SECRET", provisioningUri: "uri" };
-    const method = MfaMethod.createPendingTotp(createId<"UserId">(), secret).activate();
-    await fakeRepo.save(method);
-
-    const result = await useCase.execute({
-      methodId: method.id,
-      code: "123456"
-    });
-
-    expect(result.isErr()).toBe(true);
-    expect(result.unwrapErr().message).toContain("not in a pending state");
-  });
-
-  it("rate limits confirmation attempts after consecutive failures", async () => {
-    const { useCase, fakeRepo, savedMethods } = setup();
-    const secret = { value: "SECRET", provisioningUri: "uri" };
-    let method = MfaMethod.createPendingTotp(createId<"UserId">(), secret);
+    expect(result.unwrapErr().message).toContain("already been used");
     
-    // Simulate 5 failures
+    // It should also record a failed attempt for the replay
+    const updated = savedMethods.get(method.id)!;
+    expect(updated.failedAttempts).toBe(1);
+
+    // But a newer step code should work
+    const result2 = await useCase.execute({
+      methodId: method.id,
+      code: "VALID2" // Maps to 1001
+    });
+
+    expect(result2.isOk()).toBe(true);
+    const updated2 = savedMethods.get(method.id)!;
+    expect(updated2.lastUsedStep).toBe(1001);
+  });
+
+  it("records a failure and enforces rate limits on invalid codes", async () => {
+    const { useCase, fakeRepo, savedMethods } = setup();
+    const secret = { value: "SECRET", provisioningUri: "uri" };
+    let method = MfaMethod.createPendingTotp(createId<"UserId">(), secret).activate();
+    
     for (let i = 0; i < 5; i++) {
       method = method.recordFailedAttempt(new Date());
     }
@@ -90,7 +95,7 @@ describe("ConfirmTotpEnrollment", () => {
 
     const result = await useCase.execute({
       methodId: method.id,
-      code: "123456" // Even correct code should be rejected
+      code: "VALID1" // Even valid codes are rejected if locked
     });
 
     expect(result.isErr()).toBe(true);

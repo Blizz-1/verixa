@@ -16,6 +16,7 @@ export class MfaMethod {
     public readonly lastUsedAt?: Date,
     public readonly failedAttempts: number = 0,
     public readonly lockedUntil?: Date,
+    public readonly lastUsedStep?: number,
   ) {}
 
   static createPendingTotp(
@@ -46,7 +47,8 @@ export class MfaMethod {
       this.createdAt,
       this.lastUsedAt,
       0, // Reset attempts on success
-      undefined
+      undefined,
+      this.lastUsedStep
     );
   }
 
@@ -57,9 +59,7 @@ export class MfaMethod {
 
   recordFailedAttempt(now: Date = new Date()): MfaMethod {
     const attempts = this.failedAttempts + 1;
-    // Basic rate limit for TOTP confirmation (e.g. 5 attempts = 1 min lock, backoff x2)
-    // In production, this might inject a LockoutPolicy, but hardcoded here for simplicity
-    // based on the 10^6 code space and 30s window.
+    // Rate limit configuration could be injected, hardcoded for now
     const lockDurationMs = attempts >= 5 ? 60 * 1000 * Math.pow(2, attempts - 5) : 0;
     
     let lockedUntil: Date | undefined = undefined;
@@ -76,7 +76,29 @@ export class MfaMethod {
       this.createdAt,
       this.lastUsedAt,
       attempts,
-      lockedUntil
+      lockedUntil,
+      this.lastUsedStep
+    );
+  }
+
+  recordUse(matchedStep: number, now: Date = new Date()): MfaMethod {
+    if (this.status !== "active") {
+      throw new Error("Only active methods can be used for verification");
+    }
+    if (this.lastUsedStep !== undefined && matchedStep <= this.lastUsedStep) {
+      throw new Error("Replay detected: step has already been consumed");
+    }
+    return new MfaMethod(
+      this.id,
+      this.userId,
+      this.type,
+      this.status,
+      this.secret,
+      this.createdAt,
+      now, // update lastUsedAt
+      0,   // reset failedAttempts
+      undefined, // clear lock
+      matchedStep
     );
   }
 }
