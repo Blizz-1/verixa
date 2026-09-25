@@ -4,3 +4,4 @@ export * from "./infrastructure/persistence/prisma-mfa-method-repository.js";
 export * from "./domain/services/backup-code-set.js";
 export * from "./application/use-cases/generate-backup-codes.js";
 export * from "./application/ports/audit-logger.js";
+export * from "./application/use-cases/consume-backup-code.js";

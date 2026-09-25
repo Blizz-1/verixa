@@ -29,6 +29,11 @@ export class MfaMethod {
   public get createdAt(): Date { return this.props.createdAt; }
   public get updatedAt(): Date { return this.props.updatedAt; }
 
+  public updateSecret(secret: string): void {
+    this.props.secret = secret;
+    this.props.updatedAt = new Date();
+  }
+
   public activate(): void {
     this.props.status = "active";
     this.props.updatedAt = new Date();
@@ -56,3 +61,4 @@ export class MfaMethod {
     });
   }
 }
+
