@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MfaMethodRepository } from "../../../application/ports/mfa-method-repository.js";
-import { MfaMethod, type UserId } from "../../../domain/entities/mfa-method.js";
+import { MfaMethod, type UserId, type MfaMethodId } from "../../../domain/entities/mfa-method.js";
 
 export function mfaMethodRepositoryContract(
   createRepository: () => MfaMethodRepository,

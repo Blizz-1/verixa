@@ -14,8 +14,8 @@ export class PrismaMfaMethodRepository implements MfaMethodRepository {
     await withMappedErrors("MfaMethod", () =>
       this.prisma.mfaMethod.upsert({
         where: { id },
-        create: row,
-        update: withoutId,
+        create: row as any,
+        update: withoutId as any,
       })
     );
   }
