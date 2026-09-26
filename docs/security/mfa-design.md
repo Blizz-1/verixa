@@ -25,9 +25,33 @@ Even though the method is not yet gating a session, guessing attempts against th
 
 ## TOTP Verification & Replay Protection
 
-During login or step-up authentication, the server verifies a submitted TOTP code against an \ctive\ method, allowing a minor configurable clock drift (e.g., �1 time step).
+During login or step-up authentication, the server verifies a submitted TOTP code against an \ctive\ method, allowing a minor configurable clock drift (e.g., ±1 time step).
 
 **Why we track the \lastUsedStep\:**
 Clock-drift tolerance is a usability necessity (phones and servers rarely agree to the second), but each extra step widens the window in which a single 6-digit code is valid.
 *Alternative considered:* Accept any code that mathematically validates within the current or adjacent time step without persistent state.
 *Reason rejected:* Accepting a code unconditionally enables immediate replay attacks within the 30-90 second validity window. If a user enters their code on a compromised network or phishing proxy, the attacker could reuse the same code milliseconds later. By persisting the \lastUsedStep\ on the \MfaMethod\ and strictly rejecting any authentication attempt that maps to a step less than or equal to it, we completely neutralize replay attacks within the drift window.
+# MFA Design & Security Properties
+
+## Backup Codes
+
+Backup codes provide a critical recovery path for users who lose access to their primary second factors (like a TOTP device or passkey). 
+
+### Storage Strategy: Hashed, Never Encrypted
+
+Unlike TOTP secrets—which must be symmetrically encrypted at rest because the server requires the plaintext to compute the expected HMAC during login—backup codes are **hashed** using a slow key derivation function (Argon2), identical to the strategy we use for passwords in Issue 061.
+
+**Why?**
+Backup codes are effectively low-entropy, system-generated passwords. They are used exactly once and presented in plaintext by the user. 
+If we encrypted them at rest (like TOTP secrets), an attacker with database read access and the application's encryption key could decrypt the backup codes and bypass MFA on any account. By hashing them instead, we ensure that even a full compromise of the database and the environment variables (including the encryption key) does not reveal the backup codes. The server only needs to verify the hash when a user submits a code, meaning it never needs to recover the plaintext.
+
+### Single-Use Enforcement
+
+Each backup code is single-use. Once a code is successfully verified, its corresponding hash must be immediately removed from the database to prevent replay attacks. Because they are hashed, removing a single code's hash does not compromise the security of the remaining unused codes in the set.
+
+### Regeneration and Atomic Invalidation
+
+When a user requests a new set of backup codes, the new set completely replaces any previously issued codes for that account. This is implemented via an atomic invalidation-and-reissue in the GenerateBackupCodes use case: any existing MfaMethod of type ackup_codes is deleted before the new one is persisted.
+
+**Why?**
+We deliberately rejected the alternative of "appending" new codes to an ever-growing pool of valid backup codes. While an additive pool might seem more forgiving if a user finds an old printout, it is insecure: it means a compromised set of codes remains permanently valid unless explicitly revoked by the user, and an attacker who gains temporary access could generate a second set for themselves without alerting the user by breaking the first set. Full-set replacement guarantees that the user always has exactly one authoritative, finite set of codes at any time, and that generating a new set acts as an implicit revocation of any previously compromised or lost sets.

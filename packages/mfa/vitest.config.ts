@@ -42,6 +42,7 @@ export default mergeConfig(
           branches: 85,
         },
       },
+      name: "@verixa/credentials",
     },
   }),
 );
